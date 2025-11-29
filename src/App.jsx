@@ -29,7 +29,7 @@ const searchLocationName = async (query) => {
   try {
     // We append "Delhi" to ensure results are relevant
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5`
+      https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5
     );
     const data = await response.json();
     return data.map(item => ({
@@ -82,7 +82,7 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  const jsonString = text.replace(/json/g, '').replace(//g, '').trim();
   return JSON.parse(jsonString);
 };
 
@@ -120,7 +120,7 @@ const CompetitorCharts = ({ stats }) => {
               dataKey="value"
             >
               {stats.priceLevelDistribution.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                <Cell key={cell-${index}} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
             <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: '#fff' }} />

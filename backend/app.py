@@ -7,8 +7,17 @@ from shapely.geometry import Point
 import pandas as pd
 
 app = Flask(__name__)
-CORS(app)
-
+CORS(app, resources={
+    r"/*": {
+        "origins": [
+            "http://localhost:3000",
+            "https://maps-reimagined-frontend.onrender.com",  # Add your actual frontend URL
+            "https://*.onrender.com"  # Allow all Render subdomains
+        ],
+        "methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["Content-Type"]
+    }
+}
 # Load datasets
 def load_datasets():
     """Load all geospatial datasets"""

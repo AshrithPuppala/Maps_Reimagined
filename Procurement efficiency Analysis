@@ -1,0 +1,151 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# --- 1. DATASET: 20 NCR MICRO-MARKETS (Consolidated Data) ---
+
+def get_micro_market_data():
+    """
+    Defines the structural dataset for 20 commercial micro-markets.
+    Includes all necessary inputs for the Procurement Efficiency Score (PES).
+    """
+    data = {
+        'Micro_Market': [
+            'Delhi CBD (Connaught Place)', 'South-East Delhi (Nehru Place)', 'Delhi Aerocity (DIAL)',
+            'Okhla Industrial Area', 'Janakpuri District Centre', 'Netaji Subhash Place',
+            'Cyber City (Gurugram)', 'Golf Course Road (Gurugram)', 'Sohna Road (Gurugram)',
+            'NH-8 / Delhi-Jaipur Highway (Gurugram)', 'Sector 32/44 (Gurugram)', 'Udyog Vihar (Gurugram)',
+            'Noida Expressway (Sect 125/135)', 'Sector 62 (Noida)', 'Sector 16 (Noida)',
+            'Greater Noida West (Noida)', 'Sector 18 (Noida)', 'Noida - Greater Noida Link Road',
+            'Central Noida (Sector 58/63)', 'Laxmi Nagar (East Delhi)'
+        ],
+
+        # Procurement & Logistics Factors
+        'Avg_Rent_Per_SqFt': [284.45, 115.60, 223.91, 65.20, 95.00, 105.00,
+                              135.00, 110.50, 80.00, 75.00, 90.00, 85.00,
+                              75.00, 85.50, 99.00, 55.00, 120.00, 60.00,
+                              70.00, 82.00],
+        'Vacancy_Rate_Percent': [18.3, 13.0, 26.8, 28.0, 15.0, 12.0,
+                                 2.2, 11.5, 18.0, 15.5, 10.0, 8.5,
+                                 12.0, 16.0, 10.5, 35.0, 14.0, 25.0,
+                                 22.0, 9.0],
+        'Net_Absorption_YTD_MSF': [0.05, 0.08, 0.51, 0.02, 0.15, 0.10,
+                                   0.10, 0.35, 0.25, 0.40, 0.30, 0.05,
+                                   0.85, 0.45, 0.10, 0.01, 0.05, 0.03,
+                                   0.60, 0.15],
+        'Grade_A_Stock_MSF': [1.53, 7.09, 2.42, 0.80, 0.50, 1.20,
+                              13.99, 5.50, 3.20, 6.00, 2.80, 4.00,
+                              10.50, 4.50, 2.00, 1.50, 0.90, 2.50,
+                              3.80, 0.70],
+        'Metro_Connectivity_Score': [5, 4, 5, 2, 3, 4, 4, 3, 2, 3, 3, 4, 3, 4, 5, 1, 5, 2, 3, 5],
+        'Previous_Occupier_Rating': [4.5, 3.8, 4.2, 3.0, 3.5, 4.0, 4.7, 4.5, 3.2, 4.0, 4.3, 3.9, 3.5, 4.1, 4.0, 2.8, 4.4, 3.1, 3.6, 3.7]
+    }
+    return pd.DataFrame(data)
+
+# --- 2. PROCUREMENT EFFICIENCY SCORING LOGIC (PES) ---
+
+def min_max_normalize(series, inverse=False):
+    """Min-Max normalization to scale data between 0 and 1."""
+    min_val = series.min()
+    max_val = series.max()
+    range_val = max_val - min_val
+    if range_val == 0:
+        return pd.Series([0.5] * len(series), index=series.index)
+    if inverse:
+        # Inverse: Lower actual value yields higher score (Good for Rent, Vacancy)
+        return (max_val - series) / range_val
+    else:
+        # Direct: Higher actual value yields higher score (Good for Absorption, Stock, Connectivity)
+        return (series - min_val) / range_val
+
+def calculate_procurement_score(df_input):
+    """
+    Calculates the Procurement Efficiency Score (PES).
+    Weights prioritize Logistics, Infrastructure (Maturity/Stock), and Vendor Density (Absorption).
+    """
+    df = df_input.copy()
+
+    # PROCUREMENT-FOCUSED WEIGHTS
+    PES_WEIGHTS = {
+        'Net_Absorption_YTD_MSF': 0.30,        # Vendor Density & Market Growth (High Priority)
+        'Grade_A_Stock_MSF': 0.25,           # Infrastructure Maturity & Reliability
+        'Metro_Connectivity_Score': 0.15,      # Ease of Staff/Small Parcel Transit
+        'Avg_Rent_Per_SqFt': 0.10,             # Cost Factor (Inverse)
+        'Vacancy_Rate_Percent': 0.10,          # Supply Risk Factor (Inverse)
+        'Previous_Occupier_Rating': 0.10       # Utility Reliability/Maintenance (Proxy)
+    }
+
+    # Mapping and Inverse Status
+    SCORING_MAP = {
+        'Net_Absorption_YTD_MSF': ('Net_Absorption_YTD_MSF', False),
+        'Grade_A_Stock_MSF': ('Grade_A_Stock_MSF', False),
+        'Metro_Connectivity_Score': ('Metro_Connectivity_Score', False),
+        'Avg_Rent_Per_SqFt': ('Avg_Rent_Per_SqFt', True),
+        'Vacancy_Rate_Percent': ('Vacancy_Rate_Percent', True),
+        'Previous_Occupier_Rating': ('Previous_Occupier_Rating', False)
+    }
+
+    # 1. Normalize and apply weights
+    for col_name, (original_col, is_inverse) in SCORING_MAP.items():
+        weight = PES_WEIGHTS.get(col_name)
+
+        # Normalize the series (inverse if it's Rent or Vacancy)
+        normalized_scores = min_max_normalize(df[original_col], inverse=is_inverse)
+
+        # Calculate the weighted contribution
+        df[f'N_{col_name.split("_")[0]}'] = normalized_scores * weight
+
+    # 2. Calculate Final PES Score
+    score_cols = [f'N_{key.split("_")[0]}' for key in PES_WEIGHTS.keys()]
+    df['Procurement_Efficiency_Score'] = df[score_cols].sum(axis=1)
+
+    # 3. Re-normalize to a 10-point scale
+    min_score = df['Procurement_Efficiency_Score'].min()
+    max_score = df['Procurement_Efficiency_Score'].max()
+    score_range = max_score - min_score
+
+    df['PES_Score_10'] = (
+        (df['Procurement_Efficiency_Score'] - min_score) / score_range
+    ) * 10
+
+    # 4. Final Ranking
+    df = df.sort_values(by='PES_Score_10', ascending=False)
+
+    return df
+
+# --- 3. EXECUTION ---
+if __name__ == '__main__':
+    # 1. Load Data
+    office_df = get_micro_market_data()
+
+    # 2. Analyze and Score
+    results_df = calculate_procurement_score(office_df.copy())
+
+    # 3. Present Results (Table)
+    print("## \u26d1 Procurement Efficiency Score (PES) Analysis (Top 10)")
+    print("### Ranking Locations for Supply Chain & Vendor Access")
+    print("---")
+
+    table_cols = ['Micro_Market', 'PES Score (10.00)', 'Net_Absorption_YTD_MSF', 'Grade_A_Stock_MSF', 'Avg_Rent_Per_SqFt']
+    table_output = results_df.head(10).rename(columns={'PES_Score_10': 'PES Score (10.00)'})
+
+    # Print the resulting table for the top 10
+    print(table_output[table_cols].round(4).to_markdown(index=False))
+    print("---")
+
+    top_recommendation = results_df.iloc[0]
+    print(f"\n\u2605 **Top Recommended Location for Resource Procurement:** {top_recommendation['Micro_Market']}")
+    print(f"   (PES Score: **{top_recommendation['PES_Score_10']:.2f}/10.00**)")
+
+    # 4. Present Results (Graph)
+    plt.figure(figsize=(14, 8))
+    sns.barplot(x='Micro_Market', y='PES_Score_10', data=results_df, palette='viridis', hue='Micro_Market', legend=False)
+    plt.title('Procurement Efficiency Score (PES) for All Micro-Markets', fontsize=16)
+    plt.xlabel('Micro Market', fontsize=12)
+    plt.ylabel('PES Score (10.00)', fontsize=12)
+    plt.xticks(rotation=90, ha='right', fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.tight_layout()
+    plt.show()

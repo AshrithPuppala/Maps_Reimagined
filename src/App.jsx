@@ -12,9 +12,9 @@ import {
   ArrowRight, AlertTriangle, CheckCircle
 } from 'lucide-react';
 
-// Configuration
+// Configuration - CRITICAL: Update this with your Render backend URL
+const API_URL = process.env.REACT_APP_API_URL || 'https://integrated-lovp.onrender.com';
 const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 const LoadingState = {
   IDLE: 'IDLE',
@@ -84,16 +84,31 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
   return JSON.parse(jsonString);
 };
 
-// Backend Risk Analysis
+// Backend Risk Analysis - FIXED
 const analyzeRiskWithBackend = async (businessType, location, pincode) => {
+  console.log('Sending request to:', `${API_URL}/api/analyze`);
+  console.log('Request body:', { businessType, location, pincode });
+  
   const response = await fetch(`${API_URL}/api/analyze`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    },
     body: JSON.stringify({ businessType, location, pincode })
   });
   
-  if (!response.ok) throw new Error('Backend analysis failed');
-  return await response.json();
+  console.log('Response status:', response.status);
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.error('Backend error:', errorText);
+    throw new Error(`Backend analysis failed: ${response.status} - ${errorText}`);
+  }
+  
+  const data = await response.json();
+  console.log('Backend response:', data);
+  return data;
 };
 
 // Components
@@ -209,11 +224,11 @@ const RiskAnalysisPanel = ({ riskData }) => {
               <div key={idx} className="bg-slate-900/50 p-3 rounded border border-slate-700">
                 <div className="flex justify-between items-start">
                   <div>
-                    <p className="font-medium text-white text-sm">{alt.area}</p>
+                    <p className="font-medium text-white text-sm">{alt.name}</p>
                     <p className="text-xs text-slate-400 mt-1">{alt.reason}</p>
                   </div>
                   <div className="bg-green-900/30 px-2 py-1 rounded">
-                    <p className="text-xs text-green-400">Risk: {alt.risk}</p>
+                    <p className="text-xs text-green-400">Risk: {alt.base_risk}</p>
                   </div>
                 </div>
               </div>
@@ -347,7 +362,7 @@ const Sidebar = ({
               type="text"
               value={businessType}
               onChange={(e) => setBusinessType(e.target.value)}
-              placeholder="e.g. Coffee Shop, Gym"
+              placeholder="e.g. Coffee Shop, Gym, Cafe"
               className="flex-1 bg-slate-800 border border-slate-700 text-white px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               onKeyDown={(e) => e.key === 'Enter' && onAnalyze()}
             />
@@ -368,7 +383,10 @@ const Sidebar = ({
         {loadingState === LoadingState.ERROR && (
           <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-            <p className="text-sm">{error || "Analysis failed."}</p>
+            <div>
+              <p className="text-sm font-semibold">Analysis Failed</p>
+              <p className="text-xs mt-1">{error || "Unknown error occurred"}</p>
+            </div>
           </div>
         )}
 
@@ -444,7 +462,7 @@ const Sidebar = ({
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [businessType, setBusinessType] = useState('');
-  const [analysisMode, setAnalysisMode] = useState('competitor');
+  const [analysisMode, setAnalysisMode] = useState('risk'); // Default to risk mode for testing
   
   const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
   const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 12 });
@@ -466,7 +484,9 @@ export default function App() {
           fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_area.geojson')
         ]);
         setGeoData({ city: await cityRes.json(), area: await areaRes.json() });
-      } catch (e) { console.error("Map data error", e); }
+      } catch (e) { 
+        console.error("Map data error", e); 
+      }
     };
     fetchData();
   }, []);
@@ -485,8 +505,21 @@ export default function App() {
   };
 
   const handleAnalysis = useCallback(async () => {
+    if (!businessType.trim()) {
+      setError("Please enter a business type");
+      setLoadingState(LoadingState.ERROR);
+      return;
+    }
+
+    if (!locationQuery.trim()) {
+      setError("Please select a location");
+      setLoadingState(LoadingState.ERROR);
+      return;
+    }
+
     if (analysisMode === 'competitor' && !apiKey) {
       setError("API Key is required for competitor analysis");
+      setLoadingState(LoadingState.ERROR);
       return;
     }
     
@@ -501,21 +534,21 @@ export default function App() {
         );
         setCompetitorResult(data);
         setRiskResult(null);
+        setLoadingState(LoadingState.SUCCESS);
       } else {
         const data = await analyzeRiskWithBackend(
           businessType, locationQuery || "Selected Location", ""
         );
         setRiskResult(data);
         setCompetitorResult(null);
+        setLoadingState(LoadingState.SUCCESS);
       }
-      
-      setLoadingState(LoadingState.SUCCESS);
     } catch (e) {
-      console.error(e);
+      console.error('Analysis error:', e);
       setLoadingState(LoadingState.ERROR);
       setError(analysisMode === 'competitor' 
-        ? "AI Analysis failed. Check your API key." 
-        : "Risk analysis failed. Check backend connection.");
+        ? `AI Analysis failed: ${e.message}` 
+        : `Risk analysis failed: ${e.message}. Check that backend is running at ${API_URL}`);
     }
   }, [apiKey, businessType, selectedLocation, locationQuery, analysisMode]);
 

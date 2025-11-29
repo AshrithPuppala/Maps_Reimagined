@@ -28,14 +28,23 @@ def load_datasets():
         with open('data/delhi_future_events.json', 'r') as f:
             future_events = json.load(f)
         
+        # Fix: Use correct filenames from your data folder
         delhi_areas = gpd.read_file('data/delhi_area.geojson')
-        delhi_pincodes = gpd.read_file('data/delhi_pincode.geojson')
+        delhi_pincodes = gpd.read_file('data/delhi_pincode.geojson')  # Changed from delhi_pincodes
         delhi_points = gpd.read_file('data/delhi_points.geojson')
+        
+        # Verify they loaded correctly
+        print(f"✓ Loaded {len(delhi_areas)} areas")
+        print(f"✓ Loaded {len(delhi_pincodes)} pincodes")
+        print(f"✓ Loaded {len(delhi_points)} points")
+        print(f"✓ Loaded {len(future_events)} future events")
         
         return future_events, delhi_areas, delhi_pincodes, delhi_points
     except Exception as e:
         print(f"Error loading datasets: {e}")
-        return [], None, None, None
+        import traceback
+        traceback.print_exc()  # This will show the full error
+        return [], gpd.GeoDataFrame(), gpd.GeoDataFrame(), gpd.GeoDataFrame()
 
 FUTURE_EVENTS, DELHI_AREAS, DELHI_PINCODES, DELHI_POINTS = load_datasets()
 

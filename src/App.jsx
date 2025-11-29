@@ -93,7 +93,7 @@ const searchLocationName = async (query) => {
 // 3. Gemini Analysis (Enriches the REAL data)
 const analyzeWithGemini = async (apiKey, businessType, lat, lng, locationName, realCompetitors) => {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const competitorNames = realCompetitors.map(c => c.name).join(", ");
 

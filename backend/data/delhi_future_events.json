@@ -1,0 +1,47 @@
+[
+  {
+    "id": "evt_001",
+    "name": "Delhi Metro Phase 5 Extension",
+    "location": {"lat": 28.7041, "lng": 77.1025},
+    "timelines": {
+      "impact_start": "2025-06-01T00:00:00Z",
+      "impact_end": "2027-12-31T23:59:59Z"
+    },
+    "impact": {
+      "sentiment": "POSITIVE",
+      "score": 0.75,
+      "radius_meters": 5000,
+      "affected_sectors": ["Retail", "Restaurant", "Fitness"]
+    }
+  },
+  {
+    "id": "evt_002",
+    "name": "Highway Construction - Traffic Disruption",
+    "location": {"lat": 28.5494, "lng": 77.2501},
+    "timelines": {
+      "impact_start": "2025-03-01T00:00:00Z",
+      "impact_end": "2026-08-31T23:59:59Z"
+    },
+    "impact": {
+      "sentiment": "NEGATIVE",
+      "score": -0.6,
+      "radius_meters": 3000,
+      "affected_sectors": ["Retail", "Restaurant"]
+    }
+  },
+  {
+    "id": "evt_003",
+    "name": "New Shopping Mall Opening - Saket",
+    "location": {"lat": 28.5244, "lng": 77.2066},
+    "timelines": {
+      "impact_start": "2025-09-01T00:00:00Z",
+      "impact_end": "2030-12-31T23:59:59Z"
+    },
+    "impact": {
+      "sentiment": "POSITIVE",
+      "score": 0.85,
+      "radius_meters": 4000,
+      "affected_sectors": ["Retail", "Restaurant", "Entertainment"]
+    }
+  }
+]

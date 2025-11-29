@@ -25,7 +25,6 @@ const LoadingState = {
 // --- API SERVICES ---
 
 // 1. Geocoding Service (Free OpenStreetMap - No Key Required)
-// 1. Geocoding Service (Free OpenStreetMap - No Key Required)
 const searchLocationName = async (query) => {
   try {
     // We append "Delhi" to ensure results are relevant
@@ -83,7 +82,7 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  const jsonString = text.replace(/json/g, '').replace(//g, '').trim();
+  const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
   return JSON.parse(jsonString);
 };
 
@@ -121,7 +120,7 @@ const CompetitorCharts = ({ stats }) => {
               dataKey="value"
             >
               {stats.priceLevelDistribution.map((entry, index) => (
-                <Cell key={cell-${index}} fill={COLORS[index % COLORS.length]} />
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
             <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: '#fff' }} />
@@ -163,7 +162,7 @@ const Sidebar = ({
           </div>
         </div>
 
-        {/* Location Search Input (From old code) */}
+        {/* Location Search Input */}
         <div className="space-y-2 relative">
           <label className="text-xs font-medium text-slate-400 uppercase">2. Target Location</label>
           <div className="relative">
@@ -378,7 +377,6 @@ export default function App() {
                 error={error}
                 apiKey={apiKey}
                 setApiKey={setApiKey}
-                // New Search Props
                 locationQuery={locationQuery}
                 setLocationQuery={setLocationQuery}
                 onLocationSearch={handleLocationSearch}

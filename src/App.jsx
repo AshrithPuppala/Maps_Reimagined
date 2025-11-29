@@ -18,7 +18,7 @@ export default function BusinessLocationAnalyzer() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [loadingMap, setLoadingMap] = useState(true);
 
-  // Default Delhi Coordinates (Connaught Place)
+  // Default Delhi Coordinates (Connaught Place) - Used as fallback
   const DEFAULT_LAT = 28.6304;
   const DEFAULT_LON = 77.2177;
 
@@ -37,7 +37,7 @@ export default function BusinessLocationAnalyzer() {
     'Hotel', 'Gas Station'
   ];
 
-  // --- HELPER: Haversine Distance (to filter out Mumbai results!) ---
+  // --- HELPER: Haversine Distance (in km) ---
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
     const R = 6371; // Earth radius in km
     const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -46,7 +46,7 @@ export default function BusinessLocationAnalyzer() {
       Math.sin(dLat / 2) * Math.sin(dLat / 2) +
       Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; // Distance in km
+    return R * c; 
   };
 
   const searchLocation = async (queryText) => {
@@ -56,6 +56,7 @@ export default function BusinessLocationAnalyzer() {
     }
     
     try {
+      // Search for location suggestions
       const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(queryText)}&latitude=${DEFAULT_LAT}&longitude=${DEFAULT_LON}&state_bias=true`;
       
       const response = await fetch(url, {
@@ -72,8 +73,9 @@ export default function BusinessLocationAnalyzer() {
             properties: { 
                 name: item.name, 
                 display_name: item.address || item.name, 
-                lat: item.latitude || item.lat,
-                lon: item.longitude || item.lng || item.lon,
+                // Capture lat/lon safely
+                lat: parseFloat(item.latitude || item.lat),
+                lon: parseFloat(item.longitude || item.lng || item.lon),
                 geoid: item.id || item.place_id
             }
           }));
@@ -102,14 +104,13 @@ export default function BusinessLocationAnalyzer() {
     return () => clearTimeout(timer);
   }, [targetArea, apiKey]);
 
-  // --- FIXED: Strict Filtering ---
-  const searchNearbyBusinesses = async (lat, lon, type, locationName) => {
+  // --- FIXED: Simplified Query + Distance Filter ---
+  const searchNearbyBusinesses = async (lat, lon, type) => {
     try {
-      // TRICK: Add the area name to the query to force local results
-      // e.g., "Restaurant in Connaught Place" instead of just "Restaurant"
-      const refinedQuery = `${type} in ${locationName}`;
-      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(refinedQuery)}&latitude=${lat}&longitude=${lon}`;
-      console.log('🔍 STRICT SEARCH:', { url, refinedQuery });
+      // FIX: We do NOT append the location name here anymore.
+      // We just search for "Cafe" (type) and bias it with &latitude and &longitude
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(type)}&latitude=${lat}&longitude=${lon}`;
+      console.log('🔍 STRICT SEARCH:', { url, type, lat, lon });
 
       const response = await fetch(url, {
         method: 'GET',
@@ -124,27 +125,38 @@ export default function BusinessLocationAnalyzer() {
             if (Array.isArray(result.data)) {
                 allBusinesses = result.data;
             } else {
+                // If API returns directional keys (north, south, etc.)
                 if (result.data.north) allBusinesses.push(...result.data.north);
                 if (result.data.south) allBusinesses.push(...result.data.south);
                 if (result.data.east) allBusinesses.push(...result.data.east);
                 if (result.data.west) allBusinesses.push(...result.data.west);
+                // Fallback: check if there are direct properties that look like businesses
+                if (allBusinesses.length === 0 && typeof result.data === 'object') {
+                    // Sometimes result.data itself is the object if only 1 result
+                    if (result.data.name) allBusinesses.push(result.data);
+                }
             }
 
-            // --- CRITICAL FIX: Filter out far away results ---
+            console.log("Found raw businesses:", allBusinesses.length);
+
+            // --- FILTER: Only keep businesses within 5km ---
             const validBusinesses = allBusinesses.filter(biz => {
                 const bizLat = parseFloat(biz.latitude || biz.lat);
                 const bizLon = parseFloat(biz.longitude || biz.lng || biz.lon);
-                if (!bizLat || !bizLon) return false;
+                
+                // If invalid coords, skip
+                if (isNaN(bizLat) || isNaN(bizLon)) return false;
                 
                 const dist = calculateDistance(lat, lon, bizLat, bizLon);
-                // Only keep businesses within 5km radius
-                return dist < 5.0; 
+                return dist <= 5.0; // 5 KM Radius strict limit
             }).map(biz => ({
                 ...biz,
-                // Calculate precise distance for display
                 realDistance: calculateDistance(lat, lon, parseFloat(biz.latitude || biz.lat), parseFloat(biz.longitude || biz.lng || biz.lon))
             }));
             
+            // Sort by nearest distance
+            validBusinesses.sort((a, b) => a.realDistance - b.realDistance);
+
             return validBusinesses;
         }
       }
@@ -163,35 +175,35 @@ export default function BusinessLocationAnalyzer() {
     setAnalyzing(true);
     
     try {
-      let lat = parseFloat(selectedLocation.properties.lat);
-      let lon = parseFloat(selectedLocation.properties.lon);
-      const localityName = selectedLocation.properties.name.split(',')[0]; // Extract "Connaught Place"
-
+      let lat = selectedLocation.properties.lat;
+      let lon = selectedLocation.properties.lon;
+      
+      // Fallback if coordinates missing
       if (isNaN(lat) || isNaN(lon)) {
         lat = DEFAULT_LAT;
         lon = DEFAULT_LON;
+        console.warn("Using default coordinates");
       }
       
-      // Pass locality name to improve search accuracy
-      const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType, localityName);
+      console.log("Analyzing for:", businessType, "at", lat, lon);
+
+      // Search using simplified query
+      const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
       
       const competitors = nearbyBusinesses.length;
       const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
-        // Use REAL calculated distance
         const distanceKm = business.realDistance.toFixed(2);
         
-        // MOCK DATA DISCLAIMER: Latlong does NOT provide ratings.
-        // We simulate "People/Footfall" based on business rank to look realistic.
-        // Real data requires Google Places API ($$$).
-        const simulatedRating = (4.0 + Math.random()).toFixed(1); 
-        const simulatedFootfall = Math.floor(1000 / (idx + 1) + Math.random() * 200);
+        // Simulating metrics (Since API doesn't provide them)
+        const simulatedRating = (3.8 + Math.random() * 1.2).toFixed(1); 
+        const simulatedFootfall = Math.floor(800 / (idx + 1) + Math.random() * 300);
 
         return {
           name: business.name || `${businessType} ${idx + 1}`,
           distance: `${distanceKm} km`,
           rating: simulatedRating,
           customers: simulatedFootfall,
-          address: business.address || 'Address available in Pro Plan'
+          address: business.address || 'Address unavailable'
         };
       });
       
@@ -200,20 +212,25 @@ export default function BusinessLocationAnalyzer() {
         : "N/A";
       
       const marketSaturation = Math.min(95, Math.floor((competitors / 20) * 100));
-      const footfall = topCompetitors.reduce((sum, c) => sum + c.customers, 0) * 2; // Daily estimate
-      const avgRevenue = Math.floor(footfall * 450); // ₹450 avg ticket size
+      const footfall = topCompetitors.reduce((sum, c) => sum + c.customers, 0) + (competitors * 50); 
+      const avgRevenue = Math.floor(footfall * 350); 
       
       const locationName = selectedLocation.properties.display_name || selectedLocation.properties.name;
       const locationParts = locationName.split(',').map(s => s.trim());
       
       const recommendations = [];
-      if (competitors > 8) {
-        recommendations.push('⚠️ High competition area. You need a unique selling proposition (USP).');
+      if (competitors >= 1) {
+         if (competitors > 10) {
+            recommendations.push('⚠️ High competition. Market is saturated.');
+         } else {
+            recommendations.push('✓ Moderate competition. Valid market demand.');
+         }
       } else {
-        recommendations.push('✓ Low competition. Great opportunity for early entry.');
+        recommendations.push('✓ No direct competitors found nearby. Excellent First-Mover Advantage!');
       }
-      if (footfall > 2000) {
-        recommendations.push('✓ High footfall detected based on competitor density.');
+
+      if (footfall > 1500) {
+        recommendations.push('✓ High footfall detected based on area density.');
       }
       
       setAnalysis({

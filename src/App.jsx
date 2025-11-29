@@ -1,530 +1,356 @@
-import React, { useState, useEffect } from 'react';
-import { MapPin, Store, TrendingUp, Users, DollarSign, BarChart3, Search, AlertCircle, Loader } from 'lucide-react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Map, { Source, Layer, NavigationControl, Marker } from 'react-map-gl/maplibre';
+import 'maplibre-gl/dist/maplibre-gl.css';
+import { 
+  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, Legend 
+} from 'recharts';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { 
+  MapPin, Store, TrendingUp, TrendingDown, Users, 
+  Search, AlertCircle, Loader2, Building2, Key 
+} from 'lucide-react';
 
-export default function BusinessLocationAnalyzer() {
-  const [businessType, setBusinessType] = useState('');
-  const [targetArea, setTargetArea] = useState('');
-  const [investment, setInvestment] = useState('');
-  const [selectedLayer, setSelectedLayer] = useState('city');
-  const [mapData, setMapData] = useState(null);
-  const [pincodeData, setPincodeData] = useState(null);
-  const [areaData, setAreaData] = useState(null);
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState(null);
-  const [mapStyle, setMapStyle] = useState(null);
-  const [apiKey, setApiKey] = useState('');
-  const [showApiInput, setShowApiInput] = useState(true);
-  const [locationSuggestions, setLocationSuggestions] = useState([]);
-  const [selectedLocation, setSelectedLocation] = useState(null);
-  const [loadingMap, setLoadingMap] = useState(true);
+// --- CONFIGURATION ---
+// We use a free, open-source map style so you don't need a Mapbox/Latlong key for the visuals
+const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
-  // Default Delhi Coordinates (Connaught Place) - Used as fallback
-  const DEFAULT_LAT = 28.6304;
-  const DEFAULT_LON = 77.2177;
+// --- TYPES ---
+const LoadingState = {
+  IDLE: 'IDLE',
+  LOADING: 'LOADING',
+  SUCCESS: 'SUCCESS',
+  ERROR: 'ERROR'
+};
 
-  useEffect(() => {
-    setLoadingMap(false);
-    setMapData({ type: 'FeatureCollection', features: [] });
-    setPincodeData({ type: 'FeatureCollection', features: [] });
-    setAreaData({ type: 'FeatureCollection', features: [] });
-    setMapStyle({});
-  }, []);
+// --- API SERVICE ---
+const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng) => {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  // We use the flash model for speed. 
+  // Note: Google Maps Grounding is an Enterprise/Vertex feature. 
+  // For standard keys, Gemini will use its training data (which is very good for general knowledge).
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
-  const businessCategories = [
-    'Restaurant', 'Cafe', 'Retail Store', 'Grocery', 'Supermarket', 'Pharmacy',
-    'Gym', 'Fitness Center', 'Salon', 'Spa', 'Electronics Store', 'Clothing Store',
-    'Bakery', 'Bookstore', 'Medical Clinic', 'Hospital', 'School', 'Bank', 'ATM',
-    'Hotel', 'Gas Station'
-  ];
-
-  // --- HELPER: Haversine Distance (in km) ---
-  const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth radius in km
-    const dLat = (lat2 - lat1) * (Math.PI / 180);
-    const dLon = (lon2 - lon1) * (Math.PI / 180);
-    const a = 
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c; 
-  };
-
-  const searchLocation = async (queryText) => {
-    if (!queryText || queryText.length < 2 || !apiKey) {
-      setLocationSuggestions([]);
-      return;
-    }
+  const prompt = `
+    I want to open a "${businessType}" at coordinates ${lat}, ${lng} in Delhi, India.
     
-    try {
-      // Search for location suggestions
-      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(queryText)}&latitude=${DEFAULT_LAT}&longitude=${DEFAULT_LON}&state_bias=true`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        const dataList = Array.isArray(result.data) ? result.data : (result.data ? [result.data] : []);
-        
-        if (dataList.length > 0) {
-           const suggestions = dataList.map(item => ({
-            properties: { 
-                name: item.name, 
-                display_name: item.address || item.name, 
-                // Capture lat/lon safely
-                lat: parseFloat(item.latitude || item.lat),
-                lon: parseFloat(item.longitude || item.lng || item.lon),
-                geoid: item.id || item.place_id
-            }
-          }));
-          setLocationSuggestions(suggestions.slice(0, 8));
-        } else {
-          setLocationSuggestions([]);
-        }
-      } else {
-        if (response.status === 401) {
-          alert('Invalid API Key.');
-          setApiKey('');
-          setShowApiInput(true);
-        }
-        setLocationSuggestions([]);
-      }
-    } catch (error) {
-      console.error('❌ SEARCH EXCEPTION:', error);
-      setLocationSuggestions([]);
+    Act as a Business Strategy AI. 
+    1. Identify the likely area name based on these coordinates.
+    2. Identify 5-8 REAL existing competitors near this location using your knowledge base.
+    3. Estimate their ratings and footfall based on popularity.
+    4. Provide a SWOT analysis.
+
+    Return ONLY valid JSON with this structure:
+    {
+      "locationName": "Area Name",
+      "businessType": "${businessType}",
+      "stats": {
+        "totalCompetitors": 8,
+        "averageRating": 4.2,
+        "priceLevelDistribution": [
+           { "name": "Budget", "value": 30 },
+           { "name": "Moderate", "value": 50 },
+           { "name": "Premium", "value": 20 }
+        ],
+        "sentimentScore": 75
+      },
+      "strengths": ["Strength 1", "Strength 2", "Strength 3"],
+      "weaknesses": ["Weakness 1", "Weakness 2", "Weakness 3"],
+      "summary": "Executive summary string.",
+      "topCompetitors": [
+        { "name": "Name", "rating": 4.5, "address": "Address string" }
+      ]
     }
-  };
+  `;
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      if (targetArea && apiKey) searchLocation(targetArea);
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [targetArea, apiKey]);
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  
+  // Clean markdown if present
+  const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  return JSON.parse(jsonString);
+};
 
-  // --- FIXED: Simplified Query + Distance Filter ---
-  const searchNearbyBusinesses = async (lat, lon, type) => {
-    try {
-      // FIX: We do NOT append the location name here anymore.
-      // We just search for "Cafe" (type) and bias it with &latitude and &longitude
-      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(type)}&latitude=${lat}&longitude=${lon}`;
-      console.log('🔍 STRICT SEARCH:', { url, type, lat, lon });
+// --- COMPONENTS ---
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        let allBusinesses = [];
-        
-        if (result.data) {
-            if (Array.isArray(result.data)) {
-                allBusinesses = result.data;
-            } else {
-                // If API returns directional keys (north, south, etc.)
-                if (result.data.north) allBusinesses.push(...result.data.north);
-                if (result.data.south) allBusinesses.push(...result.data.south);
-                if (result.data.east) allBusinesses.push(...result.data.east);
-                if (result.data.west) allBusinesses.push(...result.data.west);
-                // Fallback: check if there are direct properties that look like businesses
-                if (allBusinesses.length === 0 && typeof result.data === 'object') {
-                    // Sometimes result.data itself is the object if only 1 result
-                    if (result.data.name) allBusinesses.push(result.data);
-                }
-            }
-
-            console.log("Found raw businesses:", allBusinesses.length);
-
-            // --- FILTER: Only keep businesses within 5km ---
-            const validBusinesses = allBusinesses.filter(biz => {
-                const bizLat = parseFloat(biz.latitude || biz.lat);
-                const bizLon = parseFloat(biz.longitude || biz.lng || biz.lon);
-                
-                // If invalid coords, skip
-                if (isNaN(bizLat) || isNaN(bizLon)) return false;
-                
-                const dist = calculateDistance(lat, lon, bizLat, bizLon);
-                return dist <= 5.0; // 5 KM Radius strict limit
-            }).map(biz => ({
-                ...biz,
-                realDistance: calculateDistance(lat, lon, parseFloat(biz.latitude || biz.lat), parseFloat(biz.longitude || biz.lng || biz.lon))
-            }));
-            
-            // Sort by nearest distance
-            validBusinesses.sort((a, b) => a.realDistance - b.realDistance);
-
-            return validBusinesses;
-        }
-      }
-    } catch (error) {
-      console.error('❌ BUSINESS SEARCH EXCEPTION:', error);
-    }
-    return [];
-  };
-
-  const analyzeLocation = async () => {
-    if (!businessType || !selectedLocation || !apiKey) {
-      alert('Please enter API key, select business type and choose a location from suggestions');
-      return;
-    }
-    
-    setAnalyzing(true);
-    
-    try {
-      let lat = selectedLocation.properties.lat;
-      let lon = selectedLocation.properties.lon;
-      
-      // Fallback if coordinates missing
-      if (isNaN(lat) || isNaN(lon)) {
-        lat = DEFAULT_LAT;
-        lon = DEFAULT_LON;
-        console.warn("Using default coordinates");
-      }
-      
-      console.log("Analyzing for:", businessType, "at", lat, lon);
-
-      // Search using simplified query
-      const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
-      
-      const competitors = nearbyBusinesses.length;
-      const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
-        const distanceKm = business.realDistance.toFixed(2);
-        
-        // Simulating metrics (Since API doesn't provide them)
-        const simulatedRating = (3.8 + Math.random() * 1.2).toFixed(1); 
-        const simulatedFootfall = Math.floor(800 / (idx + 1) + Math.random() * 300);
-
-        return {
-          name: business.name || `${businessType} ${idx + 1}`,
-          distance: `${distanceKm} km`,
-          rating: simulatedRating,
-          customers: simulatedFootfall,
-          address: business.address || 'Address unavailable'
-        };
-      });
-      
-      const avgRating = topCompetitors.length > 0
-        ? (topCompetitors.reduce((sum, c) => sum + parseFloat(c.rating), 0) / topCompetitors.length).toFixed(1)
-        : "N/A";
-      
-      const marketSaturation = Math.min(95, Math.floor((competitors / 20) * 100));
-      const footfall = topCompetitors.reduce((sum, c) => sum + c.customers, 0) + (competitors * 50); 
-      const avgRevenue = Math.floor(footfall * 350); 
-      
-      const locationName = selectedLocation.properties.display_name || selectedLocation.properties.name;
-      const locationParts = locationName.split(',').map(s => s.trim());
-      
-      const recommendations = [];
-      if (competitors >= 1) {
-         if (competitors > 10) {
-            recommendations.push('⚠️ High competition. Market is saturated.');
-         } else {
-            recommendations.push('✓ Moderate competition. Valid market demand.');
-         }
-      } else {
-        recommendations.push('✓ No direct competitors found nearby. Excellent First-Mover Advantage!');
-      }
-
-      if (footfall > 1500) {
-        recommendations.push('✓ High footfall detected based on area density.');
-      }
-      
-      setAnalysis({
-        competitors, avgRating, avgRevenue, footfall, marketSaturation, topCompetitors,
-        demographics: {
-          area: locationParts[locationParts.length - 1] || 'Delhi',
-          locality: locationParts[0] || selectedLocation.properties.name,
-          pincode: 'N/A'
-        },
-        recommendations,
-        locationCoords: { lat, lon },
-        totalBusinessesFound: competitors
-      });
-      
-    } catch (error) {
-      console.error('❌❌❌ ANALYSIS ERROR:', error);
-      alert('Error analyzing location.');
-    } finally {
-      setAnalyzing(false);
-    }
-  };
-
-  const selectLocation = (suggestion) => {
-    setSelectedLocation(suggestion);
-    setTargetArea(suggestion.properties.display_name || suggestion.properties.name);
-    setLocationSuggestions([]);
-  };
-
-  if (showApiInput && !apiKey) {
-    return (
-      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-6">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 max-w-md w-full">
-          <div className="flex items-center justify-center mb-6">
-            <MapPin className="w-12 h-12 text-indigo-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-800 text-center mb-2">Enter Latlong API Key</h2>
-          <p className="text-gray-600 text-center mb-6 text-sm">
-            Get your API key from <a href="https://apihub.latlong.ai" target="_blank" rel="noopener noreferrer" className="text-indigo-600 hover:underline">apihub.latlong.ai</a>
-          </p>
-          <input
-            type="password"
-            placeholder="Enter your API key"
-            className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent mb-4"
-            onKeyPress={(e) => {
-              if (e.key === 'Enter' && e.target.value) {
-                setApiKey(e.target.value);
-                setShowApiInput(false);
-              }
-            }}
-          />
-          <button
-            onClick={(e) => {
-              const input = e.target.previousElementSibling;
-              if (input.value) {
-                setApiKey(input.value);
-                setShowApiInput(false);
-              }
-            }}
-            className="w-full bg-indigo-600 text-white py-3 rounded-lg font-semibold hover:bg-indigo-700 transition-colors"
-          >
-            Continue
-          </button>
+const CompetitorCharts = ({ stats }) => {
+  const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
+  
+  return (
+    <div className="grid grid-cols-1 gap-6 mt-4">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+          <p className="text-slate-400 text-[10px] uppercase tracking-wider">Competitors</p>
+          <p className="text-2xl font-bold text-white">{stats.totalCompetitors}</p>
+        </div>
+        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+            <p className="text-slate-400 text-[10px] uppercase tracking-wider">Avg Rating</p>
+            <p className="text-2xl font-bold text-yellow-400">{stats.averageRating}</p>
+        </div>
+        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+          <p className="text-slate-400 text-[10px] uppercase tracking-wider">Sentiment</p>
+          <p className="text-2xl font-bold text-blue-400">{stats.sentimentScore}%</p>
         </div>
       </div>
-    );
-  }
 
+      {/* Charts Row */}
+      <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 h-64">
+        <h3 className="text-xs font-semibold text-slate-300 mb-2">Market Segments</h3>
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={stats.priceLevelDistribution}
+              cx="50%" cy="50%"
+              innerRadius={40} outerRadius={70}
+              paddingAngle={5}
+              dataKey="value"
+            >
+              {stats.priceLevelDistribution.map((entry, index) => (
+                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: '#fff' }} />
+            <Legend verticalAlign="bottom" height={36} />
+          </PieChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  );
+};
+
+const Sidebar = ({ 
+  businessType, setBusinessType, onAnalyze, loadingState, result, error, apiKey, setApiKey 
+}) => {
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
-      <div className="max-w-7xl mx-auto">
-        <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <MapPin className="w-8 h-8 text-indigo-600" />
-                <h1 className="text-3xl font-bold text-gray-800">Delhi Business Location Analyzer</h1>
-              </div>
-              <p className="text-gray-600 ml-11">Real-time competitor analysis powered by Latlong API</p>
-            </div>
-            <button onClick={() => { setApiKey(''); setShowApiInput(true); }} className="text-sm text-indigo-600 hover:text-indigo-700 underline">
-              Change API Key
+    <div className="h-full flex flex-col bg-slate-900/95 backdrop-blur-md border-r border-slate-700 w-full md:w-[450px] shadow-2xl overflow-hidden z-20 relative">
+      {/* Header */}
+      <div className="p-6 border-b border-slate-700 bg-slate-900">
+        <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
+          
+
+[Image of business growth chart icon]
+ Delhi Scout
+        </h1>
+        <p className="text-slate-400 text-sm mt-1">AI-Powered Location Intelligence</p>
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6 space-y-6">
+        
+        {/* API Key Input */}
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-slate-400 uppercase">1. Gemini API Key</label>
+          <div className="relative">
+            <Key className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Paste Google Gemini Key"
+              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+        </div>
+
+        {/* Business Input */}
+        <div className="space-y-2">
+          <label className="text-xs font-medium text-slate-400 uppercase">2. Business Type</label>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={businessType}
+              onChange={(e) => setBusinessType(e.target.value)}
+              placeholder="e.g. Coffee Shop, Gym"
+              className="flex-1 bg-slate-800 border border-slate-700 text-white px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+              onKeyDown={(e) => e.key === 'Enter' && onAnalyze()}
+            />
+            <button
+              onClick={onAnalyze}
+              disabled={loadingState === LoadingState.LOADING || !apiKey}
+              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center"
+            >
+              {loadingState === LoadingState.LOADING ? (
+                <Loader2 className="w-5 h-5 animate-spin" />
+              ) : (
+                <Search className="w-5 h-5" />
+              )}
             </button>
           </div>
+          {!apiKey && <p className="text-xs text-red-400">API Key required to analyze.</p>}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-1 bg-white rounded-2xl shadow-xl p-6">
-            <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
-              <Store className="w-5 h-5 text-indigo-600" />
-              Business Details
-            </h2>
+        {/* Error State */}
+        {loadingState === LoadingState.ERROR && (
+          <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex items-start gap-3">
+            <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
+            <p className="text-sm">{error || "Analysis failed. Check your API key and try again."}</p>
+          </div>
+        )}
+
+        {/* Results */}
+        {result && loadingState === LoadingState.SUCCESS && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
             
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Business Type *</label>
-                <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                  <option value="">Select business type</option>
-                  {businessCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
-                </select>
-              </div>
-
-              <div className="relative">
-                <label className="block text-sm font-medium text-gray-700 mb-2">Target Area/Location *</label>
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={targetArea}
-                    onChange={(e) => { setTargetArea(e.target.value); setSelectedLocation(null); }}
-                    onFocus={() => { if (targetArea && targetArea.length >= 2) searchLocation(targetArea); }}
-                    placeholder="Type area name (e.g., Connaught Place, Karol Bagh)"
-                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  />
-                  {targetArea && !selectedLocation && targetArea.length >= 2 && (
-                    <div className="absolute right-3 top-2.5">
-                      <Loader className="w-5 h-5 text-indigo-600 animate-spin" />
-                    </div>
-                  )}
-                </div>
-                {locationSuggestions.length > 0 && (
-                  <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto">
-                    {locationSuggestions.map((suggestion, idx) => (
-                      <div key={idx} onClick={() => selectLocation(suggestion)} className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors">
-                        <p className="font-medium text-gray-800 text-sm">{suggestion.properties.name || suggestion.properties.display_name}</p>
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{suggestion.properties.display_name}</p>
-                      </div>
-                    ))}
-                  </div>
-                )}
-                {targetArea && locationSuggestions.length === 0 && !selectedLocation && targetArea.length >= 2 && (
-                  <p className="text-xs text-gray-500 mt-1">No suggestions found. Try different keywords.</p>
-                )}
-                {selectedLocation && (
-                  <div className="flex items-center gap-1 mt-1">
-                    <p className="text-xs text-green-600">✓ Location selected</p>
-                    <button onClick={() => { setSelectedLocation(null); setTargetArea(''); }} className="text-xs text-red-600 hover:underline ml-2">Clear</button>
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Investment Budget (₹)</label>
-                <input type="number" value={investment} onChange={(e) => setInvestment(e.target.value)} placeholder="e.g., 2000000" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">Map Layer</label>
-                <select value={selectedLayer} onChange={(e) => setSelectedLayer(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
-                  <option value="city">City Boundaries</option>
-                  <option value="pincode">Pincode Areas</option>
-                  <option value="area">Locality Areas</option>
-                </select>
-              </div>
-
-              <button onClick={analyzeLocation} disabled={analyzing} className={`w-full py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${analyzing ? 'bg-gray-400 cursor-not-allowed' : !businessType || !selectedLocation ? 'bg-indigo-400 hover:bg-indigo-500 cursor-pointer' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'} text-white`}>
-                {analyzing ? (<><Loader className="w-5 h-5 animate-spin" />Analyzing Real Data...</>) : (<><Search className="w-5 h-5" />Analyze Location</>)}
-              </button>
-              {!businessType && <p className="text-xs text-red-500 mt-1">Please select a business type</p>}
-              {businessType && !selectedLocation && <p className="text-xs text-red-500 mt-1">Please select a location from suggestions</p>}
+            <div className="border-b border-slate-700 pb-4">
+              <h2 className="text-xl font-semibold text-white">{result.locationName}</h2>
+              <p className="text-blue-400 text-xs font-medium uppercase tracking-wide mt-1">
+                Analysis for: {result.businessType}
+              </p>
+              <p className="text-slate-300 text-sm mt-3 leading-relaxed italic border-l-2 border-blue-500 pl-3">
+                "{result.summary}"
+              </p>
             </div>
 
-            <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-              <div className="flex items-start gap-2">
-                <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
-                <div className="text-sm text-blue-800">
-                  <p className="font-semibold mb-1">Status:</p>
-                  <ul className="list-disc list-inside space-y-1 text-xs">
-                    <li>API: {apiKey ? '✓ Connected' : '✗ Not configured'}</li>
-                    <li>Ready for analysis</li>
-                  </ul>
-                </div>
+            <CompetitorCharts stats={result.stats} />
+
+            <div className="grid grid-cols-2 gap-3">
+               <div className="bg-emerald-900/10 border border-emerald-800/30 p-3 rounded-lg">
+                 <h3 className="text-emerald-400 text-sm font-semibold mb-2 flex items-center gap-2">
+                   <TrendingUp className="w-3 h-3" /> Strengths
+                 </h3>
+                 <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-1">
+                   {result.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                 </ul>
+               </div>
+               <div className="bg-red-900/10 border border-red-800/30 p-3 rounded-lg">
+                 <h3 className="text-red-400 text-sm font-semibold mb-2 flex items-center gap-2">
+                   <TrendingDown className="w-3 h-3" /> Risks
+                 </h3>
+                 <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-1">
+                   {result.weaknesses.map((w, i) => <li key={i}>{w}</li>)}
+                 </ul>
+               </div>
+            </div>
+
+            <div>
+              <h3 className="text-slate-200 font-semibold mb-3 flex items-center gap-2 text-sm">
+                <Building2 className="w-4 h-4 text-slate-400" /> Top Competitors
+              </h3>
+              <div className="space-y-2">
+                {result.topCompetitors.map((comp, idx) => (
+                  <div key={idx} className="bg-slate-800 p-3 rounded-md border border-slate-700 flex justify-between items-start">
+                    <div>
+                      <p className="font-medium text-slate-200 text-sm">{comp.name}</p>
+                      <p className="text-[10px] text-slate-500 truncate max-w-[150px]">{comp.address}</p>
+                    </div>
+                    <div className="flex items-center bg-slate-900 px-2 py-1 rounded">
+                      <span className="text-yellow-400 text-xs font-bold">★</span>
+                      <span className="text-xs text-white ml-1">{comp.rating}</span>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
+
           </div>
+        )}
+      </div>
+    </div>
+  );
+};
 
-          <div className="lg:col-span-2 space-y-6">
-            {!analysis ? (
-              <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
-                <BarChart3 className="w-16 h-16 text-gray-300 mx-auto mb-4" />
-                <h3 className="text-xl font-semibold text-gray-400 mb-2">Ready for Real-Time Analysis</h3>
-                <p className="text-gray-500 mb-4">Enter business details and select a location to get live competitor data from Latlong API</p>
-                <div className="inline-flex items-center gap-2 px-4 py-2 bg-green-50 text-green-700 rounded-lg text-sm">
-                  <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                  API Connected
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                  <div className="bg-white rounded-xl shadow-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Store className="w-5 h-5 text-purple-600" />
-                      <span className="text-sm text-gray-600">Competitors</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-800">{analysis.competitors}</p>
-                    <p className="text-xs text-gray-500 mt-1">within 5 km radius</p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <TrendingUp className="w-5 h-5 text-green-600" />
-                      <span className="text-sm text-gray-600">Avg Rating</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-800">{analysis.avgRating}</p>
-                    <p className="text-xs text-gray-500 mt-1">out of 5.0</p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <Users className="w-5 h-5 text-blue-600" />
-                      <span className="text-sm text-gray-600">Est. Footfall</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-800">{analysis.footfall.toLocaleString()}</p>
-                    <p className="text-xs text-gray-500 mt-1">daily average</p>
-                  </div>
-                  <div className="bg-white rounded-xl shadow-lg p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <DollarSign className="w-5 h-5 text-orange-600" />
-                      <span className="text-sm text-gray-600">Saturation</span>
-                    </div>
-                    <p className="text-2xl font-bold text-gray-800">{analysis.marketSaturation}%</p>
-                    <p className="text-xs text-gray-500 mt-1">market density</p>
-                  </div>
-                </div>
+// --- MAIN APP COMPONENT ---
 
-                <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
-                  <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
-                    <MapPin className="w-5 h-5" />
-                    Analyzed Location
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                    <div><p className="text-indigo-200 mb-1">Area</p><p className="font-semibold">{analysis.demographics.area}</p></div>
-                    <div><p className="text-indigo-200 mb-1">Locality</p><p className="font-semibold">{analysis.demographics.locality}</p></div>
-                    <div><p className="text-indigo-200 mb-1">Pincode</p><p className="font-semibold">{analysis.demographics.pincode}</p></div>
-                  </div>
-                </div>
+export default function App() {
+  const [apiKey, setApiKey] = useState('');
+  const [businessType, setBusinessType] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
+  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 11 });
+  const [geoData, setGeoData] = useState({ city: null, area: null });
+  
+  const [loadingState, setLoadingState] = useState(LoadingState.IDLE);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [error, setError] = useState(null);
 
-                <div className="bg-white rounded-2xl shadow-xl p-6">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4">
-                    Top {Math.min(5, analysis.topCompetitors.length)} Nearby Competitors
-                    <span className="text-sm font-normal text-gray-500 ml-2">({analysis.totalBusinessesFound} total found)</span>
-                  </h3>
-                  {analysis.topCompetitors.length > 0 ? (
-                    <div className="space-y-3">
-                      {analysis.topCompetitors.map((comp, idx) => (
-                        <div key={idx} className="flex items-start justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-lg hover:shadow-md transition-shadow border border-gray-100">
-                          <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-semibold flex-shrink-0">{idx + 1}</div>
-                            <div>
-                              <p className="font-semibold text-gray-800">{comp.name}</p>
-                              <p className="text-sm text-gray-500 mt-1">{comp.distance} away</p>
-                              <p className="text-xs text-gray-400 mt-1">{comp.address}</p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-semibold text-yellow-600">★ {comp.rating}</p>
-                            <p className="text-xs text-gray-500 mt-1">{comp.customers} customers</p>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className="text-center py-8 text-gray-500">
-                      <Store className="w-12 h-12 mx-auto mb-3 text-gray-300" />
-                      <p>No competitors found in this area</p>
-                      <p className="text-sm mt-1">This could be a great opportunity!</p>
-                    </div>
-                  )}
-                </div>
+  // Load Map Polygons
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [cityRes, areaRes] = await Promise.all([
+          fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_city.geojson'),
+          fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_area.geojson')
+        ]);
+        setGeoData({ city: await cityRes.json(), area: await areaRes.json() });
+      } catch (e) { console.error("Map data error", e); }
+    };
+    fetchData();
+  }, []);
 
-                <div className="bg-white rounded-2xl shadow-xl p-6">
-                  <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <BarChart3 className="w-5 h-5 text-indigo-600" />
-                    AI-Powered Insights
-                  </h3>
-                  <div className="space-y-3">
-                    {analysis.recommendations.map((rec, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
-                        <div className="text-2xl flex-shrink-0">
-                          {rec.includes('⚠️') ? '⚠️' : rec.includes('✓') ? '✓' : '💡'}
-                        </div>
-                        <p className="text-gray-700 flex-1 leading-relaxed">{rec.replace(/[⚠️✓💡]/g, '').trim()}</p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+  const handleAnalysis = useCallback(async () => {
+    if (!apiKey) return setError("API Key is required");
+    setLoadingState(LoadingState.LOADING);
+    setError(null);
+    try {
+      const data = await analyzeLocationWithGemini(
+        apiKey, businessType, selectedLocation.latitude, selectedLocation.longitude
+      );
+      setAnalysisResult(data);
+      setLoadingState(LoadingState.SUCCESS);
+    } catch (e) {
+      console.error(e);
+      setLoadingState(LoadingState.ERROR);
+      setError("AI Analysis failed. Please check your API key.");
+    }
+  }, [apiKey, businessType, selectedLocation]);
 
-                <div className="text-center">
-                  <button onClick={analyzeLocation} className="inline-flex items-center gap-2 px-6 py-3 bg-white text-indigo-600 rounded-lg font-semibold hover:bg-indigo-50 transition-colors shadow-lg">
-                    <Search className="w-5 h-5" />
-                    Refresh Analysis
-                  </button>
-                </div>
-              </>
-            )}
+  const onMapClick = (evt) => {
+    const { lng, lat } = evt.lngLat;
+    setSelectedLocation({ latitude: lat, longitude: lng });
+  };
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-white font-sans">
+      {/* Sidebar - Responsive */}
+      <div className="absolute inset-y-0 left-0 md:relative w-full md:w-auto z-20 pointer-events-none">
+          <div className="h-full pointer-events-auto">
+            <Sidebar
+                businessType={businessType}
+                setBusinessType={setBusinessType}
+                onAnalyze={handleAnalysis}
+                loadingState={loadingState}
+                result={analysisResult}
+                error={error}
+                apiKey={apiKey}
+                setApiKey={setApiKey}
+            />
           </div>
-        </div>
+      </div>
+
+      {/* Map Area */}
+      <div className="flex-1 relative z-10">
+        <Map
+          {...viewState}
+          onMove={evt => setViewState(evt.viewState)}
+          style={{ width: '100%', height: '100%' }}
+          mapStyle={MAP_STYLE_URL}
+          onClick={onMapClick}
+          cursor="crosshair"
+        >
+          <NavigationControl position="top-right" />
+          
+          <Marker 
+            latitude={selectedLocation.latitude} 
+            longitude={selectedLocation.longitude} 
+            anchor="bottom"
+          >
+             <div className="relative">
+                <div className="w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg animate-bounce" />
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-2 bg-black/50 blur-sm rounded-full" />
+             </div>
+          </Marker>
+
+          {geoData.city && (
+             <Source id="delhi-city" type="geojson" data={geoData.city}>
+               <Layer id="city-fill" type="fill" paint={{ 'fill-color': '#3b82f6', 'fill-opacity': 0.05 }} />
+             </Source>
+          )}
+          {geoData.area && (
+             <Source id="delhi-area" type="geojson" data={geoData.area}>
+               <Layer id="area-line" type="line" paint={{ 'line-color': '#34d399', 'line-width': 1, 'line-opacity': 0.3 }} />
+             </Source>
+          )}
+        </Map>
       </div>
     </div>
   );

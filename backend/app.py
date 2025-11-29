@@ -15,7 +15,7 @@ CORS(app)
 
 # LatLong API Configuration
 LATLONG_API_BASE = "https://apihub.latlong.ai"
-LATLONG_API_KEY = "your_api_key_here"  # Replace with actual key
+LATLONG_API_KEY = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJUb2tlbklEIjoiYWUwYTI1YjEtYmVhNy00MmIzLWE3MjQtZGEzZWFiZWE0ZDBlIiwiQ2xpZW50SUQiOiI3ZTIzMDlmMC1lMDc3LTQxOTEtODUzYy03NGU5NWUyNzhmNTIiLCJCdW5pdElEIjoxNTY4OSwiQXBwTmFtZSI6ImFzaHJpdGhwdXBwYWxhMDdAZ21haWwuY29tbWFpbHNpZ251cCIsIkFwcElEIjoxODUwNCwiVGltZVN0YW1wIjoiMjAyNS0xMS0yOSAwNTo1MTo0MyIsImV4cCI6MTc2Nzk5NTUwM30.wbMD-xjotHqEIrdME90hAkgdupnguEDJcMj-rS_ZB0g    # Replace with actual key
 
 # GeoJSON Data URLs (from CDN or local files)
 GEOJSON_URLS = {

@@ -1,657 +1,566 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import Map, { NavigationControl, Marker, Popup } from 'react-map-gl/maplibre';
+import 'maplibre-gl/dist/maplibre-gl.css';
 import * as THREE from 'three';
+import { 
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
+  PieChart, Pie, Cell, Legend 
+} from 'recharts';
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { 
+  MapPin, TrendingUp, TrendingDown, Search, AlertCircle, 
+  Loader2, Building2, Key, Map as MapIcon, Star, Box, Layers
+} from 'lucide-react';
 
-interface GeoJSONFeature {
-  type: "Feature";
-  properties: {
-    [key: string]: any;
-    name?: string;
-    pin_code?: string;
-    area?: string;
-  };
-  geometry: {
-    type: string;
-    coordinates: any[];
-  };
-}
+// --- CONSTANTS ---
+const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
+const MAPILLARY_API_KEY = 'MLY|25379176438437050|fd3bd452808882ea14e6749dc065c20f'; // Public token from reference
 
-interface GeoJSONCollection {
-  type: "FeatureCollection";
-  features: GeoJSONFeature[];
-}
-
-enum MapLayer {
-  CITY = "City",
-  PINCODE = "Pincode",
-  AREA = "Area"
-}
-
-interface SelectedLocation {
-  name: string;
-  type: string;
-  coordinates: [number, number];
-  properties: any;
-}
-
-interface SimulationConfig {
-  businessType: string;
-  architecturalStyle: string;
-  timeOfDay: string;
-}
-
-const MAPILLARY_API_KEY = 'MLY|25379176438437050|fd3bd452808882ea14e6749dc065c20f';
-
-const FALLBACK_DATA: GeoJSONCollection = {
-  type: "FeatureCollection",
-  features: [
-    {
-      type: "Feature",
-      properties: { name: "Connaught Place", area: "Connaught Place", pin_code: "110001" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [77.2140, 28.6340], [77.2220, 28.6340], [77.2220, 28.6270], [77.2140, 28.6270], [77.2140, 28.6340]
-        ]]
-      }
-    },
-    {
-      type: "Feature",
-      properties: { name: "Hauz Khas Village", area: "Hauz Khas", pin_code: "110016" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [77.1930, 28.5560], [77.1980, 28.5560], [77.1980, 28.5520], [77.1930, 28.5520], [77.1930, 28.5560]
-        ]]
-      }
-    },
-    {
-      type: "Feature",
-      properties: { name: "Saket District Centre", area: "Saket", pin_code: "110017" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [77.2170, 28.5260], [77.2240, 28.5260], [77.2240, 28.5200], [77.2170, 28.5200], [77.2170, 28.5260]
-        ]]
-      }
-    },
-    {
-      type: "Feature",
-      properties: { name: "Karol Bagh", area: "Karol Bagh", pin_code: "110005" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [77.1850, 28.6550], [77.1950, 28.6550], [77.1950, 28.6450], [77.1850, 28.6450], [77.1850, 28.6550]
-        ]]
-      }
-    },
-    {
-      type: "Feature",
-      properties: { name: "Lajpat Nagar", area: "Lajpat Nagar", pin_code: "110024" },
-      geometry: {
-        type: "Polygon",
-        coordinates: [[
-          [77.2350, 28.5700], [77.2450, 28.5700], [77.2450, 28.5600], [77.2350, 28.5600], [77.2350, 28.5700]
-        ]]
-      }
-    }
-  ]
+const LoadingState = {
+  IDLE: 'IDLE',
+  LOADING: 'LOADING',
+  SUCCESS: 'SUCCESS',
+  ERROR: 'ERROR'
 };
 
-const MapillaryStreetView: React.FC<{
-  location: SelectedLocation;
-  config: SimulationConfig;
-}> = ({ location, config }) => {
-  const mountRef = useRef<HTMLDivElement>(null);
+// --- SERVICES ---
+
+// 1. FREE Real-time Competitor Data (OpenStreetMap/Overpass)
+const fetchRealCompetitors = async (lat, lng, type) => {
+  try {
+    const typeMap = {
+      'Restaurant': 'amenity=restaurant',
+      'Cafe': 'amenity=cafe',
+      'Gym': 'leisure=fitness_centre',
+      'Pharmacy': 'amenity=pharmacy',
+      'Bank': 'amenity=bank',
+      'School': 'amenity=school',
+      'Hotel': 'tourism=hotel',
+      'Hospital': 'amenity=hospital'
+    };
+
+    const tag = typeMap[type] || 'amenity=restaurant'; 
+    const radius = 3000; 
+
+    const query = `
+      [out:json][timeout:25];
+      (
+        node[${tag}](around:${radius},${lat},${lng});
+        way[${tag}](around:${radius},${lat},${lng});
+      );
+      out center 15; 
+    `;
+
+    const response = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`);
+    if (!response.ok) return []; 
+    const data = await response.json();
+    if (!data.elements) return [];
+
+    return data.elements.map(place => ({
+      name: place.tags?.name || "Unnamed Business",
+      lat: place.lat || place.center?.lat,
+      lon: place.lon || place.center?.lon,
+      type: type,
+      rating: 0, 
+      address: "Fetching address..." 
+    })).filter(p => p.name !== "Unnamed Business" && p.lat && p.lon).slice(0, 10);
+
+  } catch (error) {
+    console.warn("Overpass API Error:", error);
+    return []; 
+  }
+};
+
+// 2. Geocoding
+const searchLocationName = async (query) => {
+  try {
+    const searchQuery = query.toLowerCase().includes('delhi') ? query : `${query} Delhi`;
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5&countrycodes=in`
+    );
+    const data = await response.json();
+    return data.map(item => ({
+      name: item.display_name.split(',')[0],
+      fullName: item.display_name,
+      lat: parseFloat(item.lat),
+      lon: parseFloat(item.lon)
+    }));
+  } catch (error) {
+    return [];
+  }
+};
+
+// 3. Gemini Analysis
+const analyzeWithGemini = async (apiKey, businessType, lat, lng, locationName, realCompetitors) => {
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const context = realCompetitors.length > 0 
+    ? `I have verified these REAL competitors exist nearby: [${realCompetitors.map(c => c.name).join(", ")}].`
+    : `Real-time map data was unavailable. Identify likely competitors in "${locationName}".`;
+
+  const prompt = `
+    I am opening a "${businessType}" at ${lat}, ${lng} (Near ${locationName}) in Delhi.
+    ${context}
+    Act as a Business Analyst.
+    1. Estimate competitor ratings (3.5-4.9).
+    2. Provide SWOT analysis.
+    3. Estimate market stats.
+    
+    Return JSON ONLY:
+    {
+      "locationName": "${locationName}",
+      "businessType": "${businessType}",
+      "stats": {
+        "totalCompetitors": ${realCompetitors.length > 0 ? realCompetitors.length : 8},
+        "averageRating": 4.1,
+        "priceLevelDistribution": [
+           { "name": "Budget", "value": 30 },
+           { "name": "Moderate", "value": 50 },
+           { "name": "Premium", "value": 20 }
+        ],
+        "sentimentScore": 75
+      },
+      "strengths": ["Str1", "Str2", "Str3"],
+      "weaknesses": ["Weak1", "Weak2", "Weak3"],
+      "summary": "Executive summary.",
+      "enrichedCompetitors": [
+        { "name": "Name", "rating": 4.2, "address": "Address" }
+      ]
+    }
+  `;
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
+  return JSON.parse(jsonString);
+};
+
+// --- 3D COMPONENT ---
+
+const MapillaryStreetView = ({ location, businessType, style }) => {
+  const mountRef = useRef(null);
   const [loading, setLoading] = useState(true);
-  const [streetViewImage, setStreetViewImage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [heading, setHeading] = useState(0);
+  const [streetViewImage, setStreetViewImage] = useState(null);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const fetchMapillaryImage = async () => {
+    const fetchImage = async () => {
       setLoading(true);
       setError(null);
-      
       try {
-        const [lat, lng] = location.coordinates;
-        const radius = 100;
-        
+        const { lat, lng } = location;
         const searchUrl = `https://graph.mapillary.com/images?access_token=${MAPILLARY_API_KEY}&fields=id,thumb_2048_url,computed_compass_angle&bbox=${lng-0.001},${lat-0.001},${lng+0.001},${lat+0.001}&limit=1`;
-        
         const response = await fetch(searchUrl);
         const data = await response.json();
         
         if (data.data && data.data.length > 0) {
           setStreetViewImage(data.data[0].thumb_2048_url);
-          if (data.data[0].computed_compass_angle) {
-            setHeading(data.data[0].computed_compass_angle);
-          }
         } else {
-          setError('No street view imagery available for this location');
+          setError('No street view imagery available here.');
         }
       } catch (err) {
-        console.error('Mapillary fetch error:', err);
-        setError('Failed to load street view');
+        setError('Failed to load street view.');
       } finally {
         setLoading(false);
       }
     };
-
-    fetchMapillaryImage();
+    fetchImage();
   }, [location]);
 
   useEffect(() => {
     if (!mountRef.current || !streetViewImage) return;
 
     const container = mountRef.current;
-    const scene = new THREE.Scene();
-    
-    const camera = new THREE.PerspectiveCamera(
-      75,
-      container.clientWidth / container.clientHeight,
-      0.1,
-      1000
-    );
-    camera.position.set(0, 1.6, 3);
+    // Clear previous scene
+    while(container.firstChild) container.removeChild(container.firstChild);
 
-    const renderer = new THREE.WebGLRenderer({ 
-      antialias: true,
-      alpha: true 
-    });
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, container.clientWidth / container.clientHeight, 0.1, 1000);
+    camera.position.set(0, 1.6, 4);
+
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
     container.appendChild(renderer.domElement);
 
-    const textureLoader = new THREE.TextureLoader();
-    textureLoader.load(streetViewImage, (texture) => {
-      const sphereGeometry = new THREE.SphereGeometry(500, 60, 40);
-      sphereGeometry.scale(-1, 1, 1);
-      const sphereMaterial = new THREE.MeshBasicMaterial({ map: texture });
-      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-      scene.add(sphere);
+    // 360 Sphere
+    const loader = new THREE.TextureLoader();
+    loader.load(streetViewImage, (texture) => {
+      const geometry = new THREE.SphereGeometry(500, 60, 40);
+      geometry.scale(-1, 1, 1);
+      const material = new THREE.MeshBasicMaterial({ map: texture });
+      scene.add(new THREE.Mesh(geometry, material));
     });
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
-    scene.add(ambientLight);
+    // Lights
+    scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    dirLight.position.set(5, 10, 5);
+    scene.add(dirLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
-    directionalLight.position.set(5, 10, 5);
-    scene.add(directionalLight);
-
+    // Shop Generation Logic
     const createShop = () => {
-      const shopGroup = new THREE.Group();
-
-      const buildingGeometry = new THREE.BoxGeometry(4, 3, 3);
-      let buildingColor = 0xE8D5C4;
+      const group = new THREE.Group();
       
-      switch(config.architecturalStyle) {
-        case 'Modern Industrial':
-          buildingColor = 0x2C3E50;
-          break;
-        case 'Minimalist Scandinavian':
-          buildingColor = 0xF5F5F5;
-          break;
-        case 'Traditional Indian Heritage':
-          buildingColor = 0xD4A574;
-          break;
-        case 'Cyberpunk Neon':
-          buildingColor = 0x1a1a2e;
-          break;
-        case 'Eco-Friendly Green':
-          buildingColor = 0x8FBC8F;
-          break;
-      }
+      let color = 0xE8D5C4;
+      if (style === 'Modern Industrial') color = 0x2C3E50;
+      if (style === 'Cyberpunk Neon') color = 0x1a1a2e;
+      if (style === 'Eco-Friendly Green') color = 0x8FBC8F;
 
-      const buildingMaterial = new THREE.MeshStandardMaterial({ 
-        color: buildingColor,
-        roughness: 0.6,
-        metalness: 0.2,
-        transparent: true,
-        opacity: 0.9
-      });
-      const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
+      // Building
+      const bGeo = new THREE.BoxGeometry(4, 3, 3);
+      const bMat = new THREE.MeshStandardMaterial({ color, roughness: 0.6 });
+      const building = new THREE.Mesh(bGeo, bMat);
       building.position.y = 1.5;
-      shopGroup.add(building);
+      group.add(building);
 
-      const glassGeometry = new THREE.BoxGeometry(3, 2, 0.1);
-      const glassMaterial = new THREE.MeshPhysicalMaterial({
-        color: 0x88CCFF,
-        transparent: true,
-        opacity: 0.3,
-        metalness: 0.1,
-        roughness: 0.1
-      });
-      const glass = new THREE.Mesh(glassGeometry, glassMaterial);
+      // Signage
+      const sGeo = new THREE.BoxGeometry(3.5, 0.5, 0.2);
+      const sMat = new THREE.MeshStandardMaterial({ color: 0x333333 });
+      const sign = new THREE.Mesh(sGeo, sMat);
+      sign.position.set(0, 3.3, 1.6);
+      group.add(sign);
+
+      // Text (Canvas Texture)
+      const canvas = document.createElement('canvas');
+      canvas.width = 256; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = 'white';
+      ctx.font = 'bold 30px Arial';
+      ctx.textAlign = 'center';
+      ctx.fillText(businessType.toUpperCase(), 128, 42);
+      const tMat = new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(canvas), transparent: true });
+      const text = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 0.8), tMat);
+      text.position.set(0, 3.3, 1.71);
+      group.add(text);
+
+      // Glass Front
+      const gGeo = new THREE.BoxGeometry(3, 2, 0.1);
+      const gMat = new THREE.MeshPhysicalMaterial({ color: 0x88CCFF, opacity: 0.3, transparent: true });
+      const glass = new THREE.Mesh(gGeo, gMat);
       glass.position.set(0, 1.5, 1.55);
-      shopGroup.add(glass);
+      group.add(glass);
 
-      const doorGeometry = new THREE.BoxGeometry(1, 2, 0.1);
-      const doorMaterial = new THREE.MeshStandardMaterial({ 
-        color: config.architecturalStyle === 'Cyberpunk Neon' ? 0xFF0080 : 0x654321,
-        transparent: true,
-        opacity: 0.9
-      });
-      const door = new THREE.Mesh(doorGeometry, doorMaterial);
-      door.position.set(-1.2, 1, 1.55);
-      shopGroup.add(door);
-
-      const signGeometry = new THREE.BoxGeometry(3.5, 0.4, 0.2);
-      const signMaterial = new THREE.MeshStandardMaterial({ 
-        color: config.businessType.includes('Coffee') ? 0x6F4E37 : 0x34495E,
-        transparent: true,
-        opacity: 0.95
-      });
-      const sign = new THREE.Mesh(signGeometry, signMaterial);
-      sign.position.set(0, 3.2, 1.6);
-      shopGroup.add(sign);
-
-      const textCanvas = document.createElement('canvas');
-      textCanvas.width = 512;
-      textCanvas.height = 128;
-      const ctx = textCanvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 48px Arial';
-        ctx.textAlign = 'center';
-        ctx.fillText(config.businessType.toUpperCase(), 256, 80);
-      }
-      const textTexture = new THREE.CanvasTexture(textCanvas);
-      const textMaterial = new THREE.MeshBasicMaterial({ 
-        map: textTexture,
-        transparent: true,
-        opacity: 0.9
-      });
-      const textMesh = new THREE.Mesh(
-        new THREE.PlaneGeometry(3.4, 0.35),
-        textMaterial
-      );
-      textMesh.position.set(0, 3.2, 1.71);
-      shopGroup.add(textMesh);
-
-      if (config.architecturalStyle === 'Cyberpunk Neon') {
-        const neonLight1 = new THREE.PointLight(0xFF0080, 1.5, 8);
-        neonLight1.position.set(-1, 3, 2);
-        shopGroup.add(neonLight1);
-
-        const neonLight2 = new THREE.PointLight(0x00FFFF, 1.5, 8);
-        neonLight2.position.set(1, 3, 2);
-        shopGroup.add(neonLight2);
-      }
-
-      if (config.architecturalStyle === 'Traditional Indian Heritage') {
-        const awningGeometry = new THREE.ConeGeometry(2.5, 0.8, 4);
-        const awningMaterial = new THREE.MeshStandardMaterial({ 
-          color: 0xFF6347,
-          transparent: true,
-          opacity: 0.9
-        });
-        const awning = new THREE.Mesh(awningGeometry, awningMaterial);
-        awning.rotation.y = Math.PI / 4;
-        awning.position.set(0, 3.5, 1.2);
-        shopGroup.add(awning);
-      }
-
-      if (config.architecturalStyle === 'Eco-Friendly Green') {
-        for (let i = 0; i < 3; i++) {
-          const plantGeometry = new THREE.ConeGeometry(0.2, 0.6, 8);
-          const plantMaterial = new THREE.MeshStandardMaterial({ 
-            color: 0x228B22,
-            transparent: true,
-            opacity: 0.9
-          });
-          const plant = new THREE.Mesh(plantGeometry, plantMaterial);
-          plant.position.set(-1.5 + i * 0.8, 0.3, 1.7);
-          shopGroup.add(plant);
-        }
-      }
-
-      shopGroup.position.set(0, 0, -5);
-      return shopGroup;
+      group.position.z = -5;
+      return group;
     };
 
     const shop = createShop();
     scene.add(shop);
 
-    let isDragging = false;
-    let previousMouseX = 0;
-    let currentRotation = heading;
-
-    const onMouseDown = (e: MouseEvent) => {
-      isDragging = true;
-      previousMouseX = e.clientX;
-    };
-
-    const onMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        const deltaX = e.clientX - previousMouseX;
-        currentRotation += deltaX * 0.3;
-        previousMouseX = e.clientX;
-      }
-    };
-
-    const onMouseUp = () => {
-      isDragging = false;
-    };
-
-    container.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-
-    let animationId: number;
+    // Animation Loop
+    let animationId;
     const animate = () => {
       animationId = requestAnimationFrame(animate);
-      
-      const rad = currentRotation * Math.PI / 180;
-      camera.position.x = Math.sin(rad) * 3;
-      camera.position.z = Math.cos(rad) * 3;
-      camera.lookAt(0, 1.5, -5);
-      
-      shop.rotation.y = -rad + Math.PI;
-      
       renderer.render(scene, camera);
     };
     animate();
 
-    const handleResize = () => {
-      if (!mountRef.current) return;
-      const width = mountRef.current.clientWidth;
-      const height = mountRef.current.clientHeight;
-      
-      camera.aspect = width / height;
-      camera.updateProjectionMatrix();
-      renderer.setSize(width, height);
+    // Interaction
+    let isDragging = false;
+    let startX = 0;
+    
+    container.onmousedown = (e) => { isDragging = true; startX = e.clientX; };
+    container.onmouseup = () => { isDragging = false; };
+    container.onmousemove = (e) => {
+      if(isDragging) {
+        const delta = e.clientX - startX;
+        shop.rotation.y += delta * 0.01;
+        startX = e.clientX;
+      }
     };
-
-    window.addEventListener('resize', handleResize);
 
     return () => {
       cancelAnimationFrame(animationId);
-      container.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
-      window.removeEventListener('resize', handleResize);
-      
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-      
-      scene.traverse((object) => {
-        if (object instanceof THREE.Mesh) {
-          object.geometry.dispose();
-          if (object.material instanceof THREE.Material) {
-            object.material.dispose();
-          }
-        }
-      });
-      renderer.dispose();
+      if(container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
     };
-  }, [streetViewImage, config, heading]);
+  }, [streetViewImage, businessType, style]);
 
   return (
-    <div className="relative w-full h-full">
-      <div ref={mountRef} className="w-full h-full bg-gray-900 rounded-xl overflow-hidden" />
+    <div className="relative w-full h-full bg-slate-900 rounded-xl overflow-hidden shadow-2xl border border-slate-700">
+      <div ref={mountRef} className="w-full h-full" />
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 rounded-xl">
-          <div className="text-white text-center">
-            <svg className="animate-spin h-8 w-8 text-indigo-500 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-            </svg>
-            <p className="text-sm">Loading street view...</p>
-          </div>
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-900">
+          <Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+          <span className="ml-2 text-white">Loading 3D View...</span>
         </div>
       )}
       {error && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 rounded-xl">
-          <div className="bg-amber-500/20 border border-amber-500 text-white px-6 py-4 rounded-lg max-w-sm text-center">
-            <p className="font-semibold mb-2">⚠️ Street View Unavailable</p>
-            <p className="text-sm opacity-90">{error}</p>
-            <p className="text-xs mt-2 opacity-75">Try selecting a different location</p>
-          </div>
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-900/80">
+          <div className="bg-red-500/20 text-red-200 px-4 py-2 rounded border border-red-500">{error}</div>
         </div>
       )}
       {!loading && !error && (
-        <>
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-4 py-2 rounded-full backdrop-blur-md pointer-events-none">
-            🖱️ Drag to rotate • 🏪 3D Shop Model • 📸 Real Street View
-          </div>
-          <div className="absolute top-3 right-3 bg-indigo-600/90 text-white text-xs font-bold px-3 py-1 rounded-lg shadow-lg backdrop-blur-sm">
-            MAPILLARY STREET VIEW
-          </div>
-          <div className="absolute top-3 left-3 bg-green-600/90 text-white text-xs font-bold px-3 py-1 rounded-lg shadow-lg backdrop-blur-sm">
-            3D SHOP MODEL
-          </div>
-        </>
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/60 backdrop-blur-md px-4 py-2 rounded-full text-white text-xs">
+          🖱️ Drag to rotate shop • 🌍 Real location data
+        </div>
       )}
     </div>
   );
 };
 
-const SimpleMap: React.FC<{
-  data: GeoJSONCollection;
-  onLocationSelect: (loc: SelectedLocation) => void;
-  activeLayer: MapLayer;
-}> = ({ data, onLocationSelect, activeLayer }) => {
-  const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+// --- SIDEBAR COMPONENT ---
+
+const Sidebar = ({ 
+  businessType, setBusinessType, onAnalyze, loadingState, result, error, apiKey, setApiKey,
+  locationQuery, setLocationQuery, onLocationSearch, locationSuggestions, onSelectLocation,
+  archStyle, setArchStyle, viewMode, setViewMode
+}) => {
+  const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
 
   return (
-    <div className="relative w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 p-8 overflow-auto">
-      <div className="max-w-4xl mx-auto">
-        <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-          📍 Select a Location in Delhi
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {data.features.map((feature, index) => {
-            const name = feature.properties.name || 
-                        feature.properties.area || 
-                        feature.properties.pin_code || 
-                        'Unknown';
-            
-            const coords = feature.geometry.coordinates[0];
-            const centerLat = coords.reduce((sum: number, c: number[]) => sum + c[1], 0) / coords.length;
-            const centerLng = coords.reduce((sum: number, c: number[]) => sum + c[0], 0) / coords.length;
-
-            return (
-              <button
-                key={index}
-                onClick={() => onLocationSelect({
-                  name,
-                  type: activeLayer,
-                  coordinates: [centerLat, centerLng],
-                  properties: feature.properties
-                })}
-                onMouseEnter={() => setHoveredIndex(index)}
-                onMouseLeave={() => setHoveredIndex(null)}
-                className={`p-6 rounded-xl border-2 transition-all text-left ${
-                  hoveredIndex === index
-                    ? 'border-indigo-500 bg-white shadow-xl scale-105'
-                    : 'border-gray-200 bg-white/80 hover:border-indigo-300'
-                }`}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 bg-indigo-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                    <span className="text-xl">📍</span>
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-gray-900 text-lg mb-1 truncate">{name}</h3>
-                    <p className="text-sm text-gray-500">
-                      {feature.properties.area && `Area: ${feature.properties.area}`}
-                      {feature.properties.pin_code && ` • PIN: ${feature.properties.pin_code}`}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-2">
-                      📌 {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
-                    </p>
-                  </div>
-                </div>
-              </button>
-            );
-          })}
-        </div>
+    <div className="h-full flex flex-col bg-slate-950 border-r border-slate-800 w-full md:w-[420px] shadow-2xl relative z-20">
+      <div className="p-5 border-b border-slate-800 bg-slate-900">
+        <h1 className="text-xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
+          Delhi Scout AI
+        </h1>
+        <p className="text-slate-400 text-xs mt-1">Feasibility & Visualization Engine</p>
       </div>
-    </div>
-  );
-};
 
-const App: React.FC = () => {
-  const [activeLayer, setActiveLayer] = useState<MapLayer>(MapLayer.AREA);
-  const [selectedLocation, setSelectedLocation] = useState<SelectedLocation | null>(null);
-  const [geoData, setGeoData] = useState<GeoJSONCollection>(FALLBACK_DATA);
-  const [loading, setLoading] = useState(false);
-  
-  const [config, setConfig] = useState<SimulationConfig>({
-    businessType: 'Coffee Shop',
-    architecturalStyle: 'Modern Industrial',
-    timeOfDay: 'Sunny afternoon'
-  });
-
-  const DATA_URLS = {
-    [MapLayer.CITY]: 'https://d3ucb59hn6tk5w.cloudfront.net/delhi_city.geojson',
-    [MapLayer.PINCODE]: 'https://d3ucb59hn6tk5w.cloudfront.net/delhi_pincode.geojson',
-    [MapLayer.AREA]: 'https://d3ucb59hn6tk5w.cloudfront.net/delhi_area.geojson',
-  };
-
-  useEffect(() => {
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const response = await fetch(DATA_URLS[activeLayer]);
-        if (!response.ok) throw new Error('Fetch failed');
-        const json = await response.json();
-        if (!json.features || json.features.length === 0) throw new Error('Empty data');
-        setGeoData(json);
-      } catch (error) {
-        console.warn('Using fallback data:', error);
-        setGeoData(FALLBACK_DATA);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, [activeLayer]);
-
-  return (
-    <div className="flex h-screen w-screen overflow-hidden bg-gray-50">
-      <div className="flex flex-col md:flex-row w-full h-full">
+      <div className="flex-1 overflow-y-auto p-5 space-y-6">
         
-        <div className="flex-1 h-1/2 md:h-full relative">
-          {loading ? (
-            <div className="w-full h-full flex items-center justify-center bg-gray-100">
-              <div className="text-center">
-                <svg className="animate-spin h-12 w-12 text-indigo-600 mx-auto mb-3" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                <p className="text-gray-600 font-semibold">Loading locations...</p>
-              </div>
-            </div>
-          ) : (
-            <SimpleMap 
-              data={geoData}
-              onLocationSelect={setSelectedLocation}
-              activeLayer={activeLayer}
-            />
-          )}
-        </div>
-
-        <div className="w-full md:w-[450px] bg-white border-l border-gray-200 h-full overflow-y-auto shadow-xl flex flex-col">
+        {/* CONFIG SECTION */}
+        <div className="space-y-4">
           
-          <div className="p-6 border-b border-gray-100 bg-gradient-to-r from-indigo-600 to-purple-600 text-white">
-            <h1 className="text-xl font-bold flex items-center gap-2">
-              🏪 DelhiBizViz
-            </h1>
-            <p className="text-indigo-100 text-sm mt-1">Real Street View + 3D Shop Model</p>
+          {/* API Key */}
+          <div className="relative">
+            <Key className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Gemini API Key" className="w-full bg-slate-900 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
           </div>
 
-          <div className="p-6 space-y-6 flex-1 overflow-y-auto">
-            
-            <div className="space-y-3">
-              <label className="text-xs font-semibold text-gray-500 uppercase">Map Layer</label>
-              <div className="flex bg-gray-100 p-1 rounded-lg">
-                {Object.values(MapLayer).map((layer) => (
-                  <button
-                    key={layer}
-                    onClick={() => setActiveLayer(layer)}
-                    className={`flex-1 py-2 text-sm font-medium rounded-md transition-all ${
-                      activeLayer === layer 
-                        ? 'bg-white text-indigo-600 shadow-sm' 
-                        : 'text-gray-500 hover:text-gray-700'
-                    }`}
-                  >
-                    {layer}
-                  </button>
+          {/* Location Search */}
+          <div className="relative">
+            <MapIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+            <input type="text" value={locationQuery} onChange={(e) => { setLocationQuery(e.target.value); if(e.target.value.length > 2) onLocationSearch(e.target.value); }} placeholder="Search Location (e.g. Lajpat Nagar)" className="w-full bg-slate-900 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-1 focus:ring-blue-500 outline-none" />
+            {locationSuggestions.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                {locationSuggestions.map((s, idx) => (
+                  <div key={idx} onClick={() => onSelectLocation(s)} className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700">
+                    <p className="text-sm text-white">{s.name}</p>
+                    <p className="text-xs text-slate-400 truncate">{s.fullName}</p>
+                  </div>
                 ))}
-              </div>
-            </div>
-
-            <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
-              <p className="text-xs font-semibold text-indigo-400 uppercase mb-2">Selected Location</p>
-              <h2 className="text-lg font-bold text-gray-900">
-                {selectedLocation ? selectedLocation.name : "No location selected"}
-              </h2>
-              {selectedLocation && (
-                <p className="text-xs text-gray-500 mt-2">
-                  {selectedLocation.coordinates[0].toFixed(4)}, {selectedLocation.coordinates[1].toFixed(4)}
-                </p>
-              )}
-            </div>
-
-            <div className="space-y-4">
-              <label className="text-xs font-semibold text-gray-500 uppercase">Shop Configuration</label>
-              
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
-                <select
-                  value={config.businessType}
-                  onChange={(e) => setConfig({ ...config, businessType: e.target.value })}
-                  className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                >
-                  <option value="Coffee Shop">☕ Coffee Shop</option>
-                  <option value="Boutique">👗 Boutique</option>
-                  <option value="Bakery">🥐 Bakery</option>
-                  <option value="Tech Office">💻 Tech Office</option>
-                  <option value="Restaurant">🍽️ Restaurant</option>
-                  <option value="Bookstore">📚 Bookstore</option>
-                  <option value="Gym">💪 Fitness Gym</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Architectural Style</label>
-                <select
-                  value={config.architecturalStyle}
-                  onChange={(e) => setConfig({ ...config, architecturalStyle: e.target.value })}
-                  className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                >
-                  <option value="Modern Industrial">Modern Industrial</option>
-                  <option value="Minimalist Scandinavian">Minimalist Scandinavian</option>
-                  <option value="Traditional Indian Heritage">Traditional Heritage</option>
-                  <option value="Cyberpunk Neon">Cyberpunk / Neon</option>
-                  <option value="Eco-Friendly Green">Eco-Friendly</option>
-                </select>
-              </div>
-            </div>
-
-            {selectedLocation && (
-              <div className="space-y-3 pt-4 border-t">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-semibold text-gray-900 uppercase">Live Preview</h3>
-                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Real Imagery + 3D Model</span>
-                </div>
-                <div className="w-full h-[450px] rounded-xl overflow-hidden shadow-lg border border-gray-200">
-                  <MapillaryStreetView location={selectedLocation} config={config} />
-                </div>
-                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
-                  <p className="text-xs text-blue-800">
-                    <strong>📸 Mapillary Integration:</strong> Real street-level imagery from the selected location with an interactive 3D shop model overlay.
-                  </p>
-                </div>
               </div>
             )}
           </div>
+
+          {/* Business & Style */}
+          <div className="grid grid-cols-2 gap-2">
+            <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} className="bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none">
+              <option value="">Type</option>
+              {['Restaurant', 'Cafe', 'Gym', 'Pharmacy', 'Bank', 'Hotel'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <select value={archStyle} onChange={(e) => setArchStyle(e.target.value)} className="bg-slate-900 border border-slate-700 text-white px-3 py-2 rounded-lg text-sm outline-none">
+              <option value="Modern Industrial">Modern</option>
+              <option value="Cyberpunk Neon">Cyberpunk</option>
+              <option value="Eco-Friendly Green">Eco</option>
+            </select>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="flex gap-2">
+            <button onClick={onAnalyze} disabled={loadingState === LoadingState.LOADING || !apiKey || !businessType} className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded-lg text-sm font-medium transition-colors flex justify-center items-center gap-2">
+              {loadingState === LoadingState.LOADING ? <Loader2 className="w-4 h-4 animate-spin" /> : <><Search className="w-4 h-4" /> Analyze</>}
+            </button>
+          </div>
+          
+          {/* View Toggles */}
+          <div className="flex bg-slate-900 p-1 rounded-lg border border-slate-800">
+            <button onClick={() => setViewMode('map')} className={`flex-1 py-1.5 text-xs font-medium rounded ${viewMode === 'map' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>Map View</button>
+            <button onClick={() => setViewMode('3d')} className={`flex-1 py-1.5 text-xs font-medium rounded ${viewMode === '3d' ? 'bg-slate-700 text-white' : 'text-slate-400'}`}>3D Sim</button>
+          </div>
         </div>
+
+        {/* ERROR */}
+        {loadingState === LoadingState.ERROR && (
+          <div className="bg-red-900/20 border border-red-800 text-red-200 p-3 rounded-lg text-xs">{error}</div>
+        )}
+
+        {/* ANALYTICS RESULTS */}
+        {result && loadingState === LoadingState.SUCCESS && (
+          <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            
+            <div className="grid grid-cols-3 gap-2">
+              <div className="bg-slate-800 p-2 rounded border border-slate-700 text-center">
+                <p className="text-slate-400 text-[10px] uppercase">Competitors</p>
+                <p className="text-xl font-bold text-white">{result.stats.totalCompetitors}</p>
+              </div>
+              <div className="bg-slate-800 p-2 rounded border border-slate-700 text-center">
+                  <p className="text-slate-400 text-[10px] uppercase">Avg Rating</p>
+                  <p className="text-xl font-bold text-yellow-400">{result.stats.averageRating}</p>
+              </div>
+              <div className="bg-slate-800 p-2 rounded border border-slate-700 text-center">
+                <p className="text-slate-400 text-[10px] uppercase">Sentiment</p>
+                <p className="text-xl font-bold text-blue-400">{result.stats.sentimentScore}%</p>
+              </div>
+            </div>
+
+            <div className="h-40">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={result.stats.priceLevelDistribution} cx="50%" cy="50%" innerRadius={30} outerRadius={55} paddingAngle={5} dataKey="value">
+                    {result.stats.priceLevelDistribution.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                  </Pie>
+                  <Legend verticalAlign="bottom" height={36} iconSize={8} wrapperStyle={{fontSize: '10px'}} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-2">
+              <h3 className="text-slate-300 text-xs font-bold uppercase flex items-center gap-2"><Building2 className="w-3 h-3" /> Top Competitors</h3>
+              {result.topCompetitors.map((comp, idx) => (
+                <div key={idx} className="bg-slate-800 p-2 rounded border border-slate-700 flex justify-between items-center">
+                  <div>
+                    <p className="text-white text-xs font-medium">{comp.name}</p>
+                    <p className="text-[10px] text-slate-500 truncate max-w-[150px]">{comp.address}</p>
+                  </div>
+                  <div className="flex items-center bg-slate-900 px-1.5 py-0.5 rounded">
+                    <Star className="w-3 h-3 text-yellow-400 mr-1" />
+                    <span className="text-xs text-white">{comp.rating}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
-export default App;
+// --- MAIN LAYOUT ---
+
+export default function App() {
+  const [apiKey, setApiKey] = useState('');
+  const [businessType, setBusinessType] = useState('');
+  const [archStyle, setArchStyle] = useState('Modern Industrial');
+  
+  const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
+  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 12 });
+  const [viewMode, setViewMode] = useState('map'); // 'map' or '3d'
+  
+  const [locationQuery, setLocationQuery] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  
+  const [loadingState, setLoadingState] = useState(LoadingState.IDLE);
+  const [analysisResult, setAnalysisResult] = useState(null);
+  const [competitorPins, setCompetitorPins] = useState([]); 
+  const [error, setError] = useState(null);
+  const [hoveredPin, setHoveredPin] = useState(null);
+
+  const handleLocationSearch = useCallback(async (query) => {
+    const results = await searchLocationName(query);
+    setLocationSuggestions(results);
+  }, []);
+
+  const handleSelectLocation = (suggestion) => {
+    const newCoords = { latitude: suggestion.lat, longitude: suggestion.lon };
+    setSelectedLocation(newCoords);
+    setViewState({ ...newCoords, zoom: 15 });
+    setLocationQuery(suggestion.name);
+    setLocationSuggestions([]);
+  };
+
+  const handleAnalysis = useCallback(async () => {
+    if (!apiKey || !businessType) return setError("API Key and Business Type required");
+    setLoadingState(LoadingState.LOADING);
+    setError(null);
+    setCompetitorPins([]); 
+
+    try {
+      const realCompetitors = await fetchRealCompetitors(selectedLocation.latitude, selectedLocation.longitude, businessType);
+      
+      const data = await analyzeWithGemini(
+        apiKey, businessType, selectedLocation.latitude, selectedLocation.longitude,
+        locationQuery || "Selected Location", realCompetitors
+      );
+
+      let mergedPins = [];
+      let finalCompetitorsList = [];
+
+      if (realCompetitors.length > 0) {
+          mergedPins = realCompetitors.map(real => {
+            const enriched = data.enrichedCompetitors?.find(e => e.name === real.name) || {};
+            return { ...real, ...enriched, rating: enriched.rating || (3.5 + Math.random()).toFixed(1) };
+          });
+          finalCompetitorsList = mergedPins;
+      } else {
+          finalCompetitorsList = data.enrichedCompetitors || [];
+      }
+
+      setCompetitorPins(mergedPins);
+      setAnalysisResult({ ...data, topCompetitors: finalCompetitorsList });
+      setLoadingState(LoadingState.SUCCESS);
+
+    } catch (e) {
+      console.error(e);
+      setLoadingState(LoadingState.ERROR);
+      setError("Analysis failed. Check API Key.");
+    }
+  }, [apiKey, businessType, selectedLocation, locationQuery]);
+
+  return (
+    <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-white font-sans">
+      <div className="h-full pointer-events-auto z-20">
+        <Sidebar
+            businessType={businessType} setBusinessType={setBusinessType}
+            archStyle={archStyle} setArchStyle={setArchStyle}
+            viewMode={viewMode} setViewMode={setViewMode}
+            onAnalyze={handleAnalysis} loadingState={loadingState}
+            result={analysisResult} error={error}
+            apiKey={apiKey} setApiKey={setApiKey}
+            locationQuery={locationQuery} setLocationQuery={setLocationQuery}
+            onLocationSearch={handleLocationSearch} locationSuggestions={locationSuggestions}
+            onSelectLocation={handleSelectLocation}
+        />
+      </div>
+
+      <div className="flex-1 relative z-10 bg-black">
+        {viewMode === 'map' ? (
+          <Map
+            {...viewState}
+            onMove={evt => setViewState(evt.viewState)}
+            style={{ width: '100%', height: '100%' }}
+            mapStyle={MAP_STYLE_URL}
+            onClick={(evt) => setSelectedLocation({ latitude: evt.lngLat.lat, longitude: evt.lngLat.lng })}
+            cursor="crosshair"
+          >
+            <NavigationControl position="top-right" />
+            <Marker latitude={selectedLocation.latitude} longitude={selectedLocation.longitude} anchor="bottom">
+               <div className="relative">
+                  <div className="w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-bounce" />
+               </div>
+            </Marker>
+            {competitorPins.map((comp, idx) => (
+              <Marker key={idx} latitude={comp.lat} longitude={comp.lon} anchor="bottom" onClick={e => { e.originalEvent.stopPropagation(); setHoveredPin(comp); }}>
+                <div className="group relative cursor-pointer hover:scale-110 transition-transform">
+                  <MapPin className="w-6 h-6 text-red-500 fill-red-900 drop-shadow-md" />
+                </div>
+              </Marker>
+            ))}
+            {hoveredPin && (
+              <Popup latitude={hoveredPin.lat} longitude={hoveredPin.lon} onClose={() => setHoveredPin(null)} closeButton={true} closeOnClick={false} offset={15} className="text-black">
+                <div className="p-2 min-w-[150px]">
+                  <h3 className="font-bold text-sm text-slate-800">{hoveredPin.name}</h3>
+                  <div className="flex items-center gap-1 mt-1">
+                    <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                    <span className="text-xs font-medium text-slate-600">{hoveredPin.rating || "N/A"}</span>
+                  </div>
+                </div>
+              </Popup>
+            )}
+          </Map>
+        ) : (
+          <div className="w-full h-full p-6">
+             <MapillaryStreetView 
+                location={{ lat: selectedLocation.latitude, lng: selectedLocation.longitude }} 
+                businessType={businessType} 
+                style={archStyle} 
+             />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

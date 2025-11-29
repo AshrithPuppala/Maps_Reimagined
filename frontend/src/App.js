@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { AlertCircle, TrendingUp, TrendingDown, MapPin, Calendar, AlertTriangle, Loader } from 'lucide-react';
 import axios from 'axios';
@@ -13,6 +13,27 @@ const BusinessFeasibilityTool = () => {
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [apiStatus, setApiStatus] = useState('checking');
+
+  // Check API health on component mount
+  useEffect(() => {
+    const checkAPI = async () => {
+      try {
+        const response = await axios.get(`${API_URL}/api/health`, { 
+          timeout: 60000 
+        });
+        if (response.data && response.data.status) {
+          setApiStatus('online');
+        } else {
+          setApiStatus('offline');
+        }
+      } catch (err) {
+        console.error('API health check failed:', err);
+        setApiStatus('offline');
+      }
+    };
+    checkAPI();
+  }, []);
 
   const analyzeLocation = async () => {
     if (!businessType || !location) {
@@ -32,17 +53,18 @@ const BusinessFeasibilityTool = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 60000,
+        timeout: 90000, // Increased to 90 seconds
       });
 
       setAnalysis(response.data);
+      setError(null);
     } catch (err) {
       if (err.code === 'ECONNABORTED') {
-        setError('Request timeout. The server took too long to respond. Please try again.');
+        setError('Request timeout. The backend server is starting up (this can take 30-60 seconds on first request). Please try again.');
       } else if (err.response) {
         setError(err.response?.data?.error || `Server error: ${err.response.status}. Please try again.`);
       } else if (err.request) {
-        setError('Unable to reach the server. Please check your connection and try again.');
+        setError('Unable to reach the server. The backend may be starting up. Please wait 30 seconds and try again.');
       } else {
         setError('Failed to analyze location. Please try again.');
       }
@@ -80,9 +102,22 @@ const BusinessFeasibilityTool = () => {
             Powered by real-time future development data
           </p>
           <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
-            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-            <span>Connected to API: {API_URL}</span>
+            <div className={`w-2 h-2 rounded-full ${
+              apiStatus === 'online' ? 'bg-green-500 animate-pulse' : 
+              apiStatus === 'checking' ? 'bg-yellow-500 animate-pulse' : 
+              'bg-red-500'
+            }`}></div>
+            <span>
+              API Status: {apiStatus === 'online' ? 'Connected ✓' : 
+                           apiStatus === 'checking' ? 'Connecting...' : 
+                           'Offline (Starting up...)'} | {API_URL}
+            </span>
           </div>
+          {apiStatus === 'offline' && (
+            <p className="text-xs text-orange-600 mt-2">
+              ⏳ Backend is waking up. First request may take 30-60 seconds.
+            </p>
+          )}
         </div>
 
         <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 mb-8 border border-indigo-100">
@@ -135,7 +170,7 @@ const BusinessFeasibilityTool = () => {
 
           {error && (
             <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
-              <AlertCircle className="w-5 h-5" />
+              <AlertCircle className="w-5 h-5 flex-shrink-0" />
               <span>{error}</span>
             </div>
           )}
@@ -148,7 +183,7 @@ const BusinessFeasibilityTool = () => {
             {loading ? (
               <>
                 <Loader className="w-5 h-5 animate-spin" />
-                Analyzing...
+                <span>Analyzing (may take up to 60s)...</span>
               </>
             ) : (
               'Analyze Feasibility'
@@ -196,10 +231,10 @@ const BusinessFeasibilityTool = () => {
 
             <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
               <h2 className="text-2xl font-semibold mb-6 text-gray-800">
-                Future Impact Events ({analysis.events.length})
+                Future Impact Events ({analysis.events?.length || 0})
               </h2>
               
-              {analysis.events.length === 0 ? (
+              {(!analysis.events || analysis.events.length === 0) ? (
                 <div className="text-center py-8 text-gray-500">
                   <AlertCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
                   <p>No significant future events found in this area</p>
@@ -210,25 +245,29 @@ const BusinessFeasibilityTool = () => {
                     <div 
                       key={idx}
                       className={`border-l-4 p-5 rounded-lg transition-all hover:shadow-md ${
-                        event.impact.sentiment === 'POSITIVE' 
+                        event.impact?.sentiment === 'POSITIVE' 
                           ? 'border-green-500 bg-gradient-to-r from-green-50 to-white' 
                           : 'border-red-500 bg-gradient-to-r from-red-50 to-white'
                       }`}
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex-1">
-                          <h3 className="font-semibold text-lg text-gray-800 mb-2">{event.name}</h3>
-                          <p className="text-sm text-gray-600 mb-3">{event.description}</p>
+                          <h3 className="font-semibold text-lg text-gray-800 mb-2">{event.name || 'Unnamed Event'}</h3>
+                          <p className="text-sm text-gray-600 mb-3">{event.description || 'No description available'}</p>
                           
                           <div className="flex flex-wrap gap-4 text-sm text-gray-700">
-                            <div className="flex items-center gap-1">
-                              <Calendar className="w-4 h-4 text-indigo-600" />
-                              <span>Impact: {new Date(event.timelines.impact_start).toLocaleDateString('en-IN')}</span>
-                            </div>
-                            <div className="flex items-center gap-1">
-                              <MapPin className="w-4 h-4 text-indigo-600" />
-                              <span>{event.location.area_name}</span>
-                            </div>
+                            {event.timelines?.impact_start && (
+                              <div className="flex items-center gap-1">
+                                <Calendar className="w-4 h-4 text-indigo-600" />
+                                <span>Impact: {new Date(event.timelines.impact_start).toLocaleDateString('en-IN')}</span>
+                              </div>
+                            )}
+                            {event.location?.area_name && (
+                              <div className="flex items-center gap-1">
+                                <MapPin className="w-4 h-4 text-indigo-600" />
+                                <span>{event.location.area_name}</span>
+                              </div>
+                            )}
                             {event.distance_meters && (
                               <div className="text-gray-500">
                                 {(event.distance_meters / 1000).toFixed(2)} km away
@@ -237,21 +276,25 @@ const BusinessFeasibilityTool = () => {
                           </div>
                           
                           <div className="mt-3 flex gap-2">
-                            <span className="text-xs bg-white px-3 py-1 rounded-full border border-gray-200 font-medium">
-                              {event.status}
-                            </span>
-                            <span className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">
-                              {event.type.replace(/_/g, ' ')}
-                            </span>
+                            {event.status && (
+                              <span className="text-xs bg-white px-3 py-1 rounded-full border border-gray-200 font-medium">
+                                {event.status}
+                              </span>
+                            )}
+                            {event.type && (
+                              <span className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">
+                                {event.type.replace(/_/g, ' ')}
+                              </span>
+                            )}
                           </div>
                         </div>
                         
                         <div className={`text-right min-w-[100px] ${
-                          event.impact.sentiment === 'POSITIVE' ? 'text-green-600' : 'text-red-600'
+                          event.impact?.sentiment === 'POSITIVE' ? 'text-green-600' : 'text-red-600'
                         }`}>
                           <p className="text-3xl font-bold">
-                            {event.impact.sentiment === 'POSITIVE' ? '+' : ''}
-                            {Math.round(event.impact.score * 100)}%
+                            {event.impact?.sentiment === 'POSITIVE' ? '+' : ''}
+                            {Math.round((event.impact?.score || 0) * 100)}%
                           </p>
                           <p className="text-xs mt-1 font-medium">Impact Score</p>
                         </div>
@@ -262,61 +305,63 @@ const BusinessFeasibilityTool = () => {
               )}
             </div>
 
-            <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
-              <h2 className="text-2xl font-semibold mb-6 text-gray-800">
-                10-Year Success Projection
-              </h2>
-              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg mb-6">
-                <p className="text-sm text-gray-700">
-                  This projection accounts for the timing and decay of impact from all identified future events.
-                  Success probability adjusts as events materialize and their effects diminish over time.
-                </p>
+            {analysis.projectionData && analysis.projectionData.length > 0 && (
+              <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
+                <h2 className="text-2xl font-semibold mb-6 text-gray-800">
+                  10-Year Success Projection
+                </h2>
+                <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg mb-6">
+                  <p className="text-sm text-gray-700">
+                    This projection accounts for the timing and decay of impact from all identified future events.
+                    Success probability adjusts as events materialize and their effects diminish over time.
+                  </p>
+                </div>
+                <ResponsiveContainer width="100%" height={400}>
+                  <AreaChart data={analysis.projectionData}>
+                    <defs>
+                      <linearGradient id="colorProb" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                        <stop offset="95%" stopColor="#10b981" stopOpacity={0.2}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                    <XAxis 
+                      dataKey="year" 
+                      stroke="#6b7280"
+                      style={{ fontSize: '12px' }}
+                    />
+                    <YAxis 
+                      domain={[0, 100]} 
+                      stroke="#6b7280"
+                      style={{ fontSize: '12px' }}
+                      label={{ 
+                        value: 'Success Probability (%)', 
+                        angle: -90, 
+                        position: 'insideLeft',
+                        style: { fontSize: '12px', fill: '#6b7280' }
+                      }} 
+                    />
+                    <Tooltip 
+                      contentStyle={{ 
+                        backgroundColor: 'white', 
+                        border: '1px solid #e5e7eb',
+                        borderRadius: '8px',
+                        boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                      }}
+                    />
+                    <Legend />
+                    <Area 
+                      type="monotone" 
+                      dataKey="probability" 
+                      stroke="#10b981" 
+                      strokeWidth={2}
+                      fill="url(#colorProb)"
+                      name="Success Probability (%)"
+                    />
+                  </AreaChart>
+                </ResponsiveContainer>
               </div>
-              <ResponsiveContainer width="100%" height={400}>
-                <AreaChart data={analysis.projectionData}>
-                  <defs>
-                    <linearGradient id="colorProb" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.2}/>
-                    </linearGradient>
-                  </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
-                  <XAxis 
-                    dataKey="year" 
-                    stroke="#6b7280"
-                    style={{ fontSize: '12px' }}
-                  />
-                  <YAxis 
-                    domain={[0, 100]} 
-                    stroke="#6b7280"
-                    style={{ fontSize: '12px' }}
-                    label={{ 
-                      value: 'Success Probability (%)', 
-                      angle: -90, 
-                      position: 'insideLeft',
-                      style: { fontSize: '12px', fill: '#6b7280' }
-                    }} 
-                  />
-                  <Tooltip 
-                    contentStyle={{ 
-                      backgroundColor: 'white', 
-                      border: '1px solid #e5e7eb',
-                      borderRadius: '8px',
-                      boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-                    }}
-                  />
-                  <Legend />
-                  <Area 
-                    type="monotone" 
-                    dataKey="probability" 
-                    stroke="#10b981" 
-                    strokeWidth={2}
-                    fill="url(#colorProb)"
-                    name="Success Probability (%)"
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
+            )}
 
             {analysis.riskScore > 40 && (
               <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl shadow-2xl p-6 md:p-8 border-2 border-orange-200">

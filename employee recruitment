@@ -1,0 +1,187 @@
+import pandas as pd
+import numpy as np
+
+# API Key variable (set to empty string for platform compatibility)
+API_KEY = ""
+
+# --- 1. DATASET: 20 NCR MICRO-MARKETS (Includes Hotspot and Timing Data) ---
+
+def get_micro_market_data():
+    """
+    Defines the structured dataset for 20 commercial micro-markets in Delhi NCR.
+    Data structure remains consistent with previous steps.
+    """
+    data = {
+        'Micro_Market': [
+            'Delhi CBD (Connaught Place)', 'South-East Delhi (Nehru Place)', 'Delhi Aerocity (DIAL)', 
+            'Okhla Industrial Area', 'Janakpuri District Centre', 'Netaji Subhash Place',
+            'Cyber City (Gurugram)', 'Golf Course Road (Gurugram)', 'Sohna Road (Gurugram)', 
+            'NH-8 / Delhi-Jaipur Highway (Gurugram)', 'Sector 32/44 (Gurugram)', 'Udyog Vihar (Gurugram)',
+            'Noida Expressway (Sect 125/135)', 'Sector 62 (Noida)', 'Sector 16 (Noida)', 
+            'Greater Noida West (Noida)', 'Sector 18 (Noida)', 'Noida - Greater Noida Link Road',
+            'Central Noida (Sector 58/63)', 'Laxmi Nagar (East Delhi)'
+        ],
+        
+        # Required for TAES Calculation: Cost (Rent), Density (College), Efficiency (Metro)
+        'Avg_Rent_Per_SqFt': [284.45, 115.60, 223.91, 65.20, 95.00, 105.00, 
+                              135.00, 110.50, 80.00, 75.00, 90.00, 85.00, 
+                              75.00, 85.50, 99.00, 55.00, 120.00, 60.00, 
+                              70.00, 82.00], 
+        'Proximity_to_Colleges': [4, 5, 2, 3, 4, 3, 3, 2, 2, 3, 3, 4, 4, 5, 5, 1, 4, 2, 4, 5], 
+        'Metro_Connectivity_Score': [5, 4, 5, 2, 3, 4, 4, 3, 2, 3, 3, 4, 3, 4, 5, 1, 5, 2, 3, 5],
+        
+        # Operational Timing (for final recommendation narrative)
+        'Peak_Efficiency_Timing': [
+            'Standard B2B Day (10am-7pm)', 'Retail/Tech Day (11am-8pm)', 'Global B2B/Airport (24hr)', 
+            'Industrial Day (9am-6pm)', 'Local Business Day (10am-7pm)', 'Local Business Day (10am-7pm)',
+            'Corporate B2B Day (9am-6pm)', 'Corporate B2B Day (9am-6pm)', 'Tech/Flex Day (10am-7pm)', 
+            'Tech/Flex Day (10am-7pm)', 'Corporate B2B Day (9am-6pm)', 'Industrial/Tech Day (9am-6pm)',
+            'Tech/Flex Day (10am-7pm)', 'Retail/Tech Day (11am-8pm)', 'Retail/Tech Day (11am-8pm)', 
+            'Low Activity', 'Retail/Tech Day (11am-8pm)', 'Low Activity',
+            'Tech/Flex Day (10am-7pm)', 'Retail/Tech Day (11am-8pm)'
+        ]
+    }
+    return pd.DataFrame(data)
+
+# --- 2. TALENT ACQUISITION EFFICIENCY SCORING LOGIC (TAES) ---
+
+def min_max_normalize(series, inverse=False):
+    """Min-Max normalization to scale data between 0 and 1."""
+    min_val = series.min()
+    max_val = series.max()
+    range_val = max_val - min_val
+    if range_val == 0:
+        return pd.Series([0.5] * len(series), index=series.index)
+    if inverse:
+        # Inverse: Lower actual value (Rent/Cost) yields higher score (Good)
+        return (max_val - series) / range_val
+    else:
+        # Direct: Higher actual value (Density/Connectivity) yields higher score (Good)
+        return (series - min_val) / range_val
+
+def calculate_taes_score(df_input):
+    """
+    Calculates the Talent Acquisition Efficiency Score (TAES).
+    Weights prioritize Talent Density, Cost Efficiency, and Commute Efficiency.
+    """
+    df = df_input.copy()
+
+    # TAES WEIGHTS (Based on the proposed formula: D*0.5 + C*0.3 + E*0.2)
+    TAES_WEIGHTS = {
+        'College_Prox': 0.5,        # Talent Density (D) - Highest Priority
+        'Avg_Rent_Per_SqFt': 0.3,   # Cost Efficiency (C) - Inverse Factor
+        'Metro_Connectivity_Score': 0.2  # Commute Efficiency (E)
+    }
+
+    # 1. Normalize and apply weights for Cost Efficiency (C)
+    df['N_Cost'] = min_max_normalize(df['Avg_Rent_Per_SqFt'], inverse=True) * TAES_WEIGHTS['Avg_Rent_Per_SqFt']
+
+    # 2. Normalize and apply weights for Talent Density (D)
+    df['N_Density'] = min_max_normalize(df['Proximity_to_Colleges'], inverse=False) * TAES_WEIGHTS['College_Prox']
+
+    # 3. Normalize and apply weights for Commute Efficiency (E)
+    # NOTE: The calculation for Metro Connectivity Score remains active here.
+    df['N_Commute'] = min_max_normalize(df['Metro_Connectivity_Score'], inverse=False) * TAES_WEIGHTS['Metro_Connectivity_Score']
+
+    # 4. Calculate Final TAES Score by summing all weighted contributions
+    df['TAES_Score_Raw'] = df['N_Cost'] + df['N_Density'] + df['N_Commute']
+
+    # 5. Re-normalize the raw score to a 10-point scale for presentation clarity
+    min_score = df['TAES_Score_Raw'].min()
+    max_score = df['TAES_Score_Raw'].max()
+    score_range = max_score - min_score
+    
+    df['TAES_Score_10'] = ((df['TAES_Score_Raw'] - min_score) / score_range) * 10
+    
+    # 6. Final Ranking
+    df = df.sort_values(by='TAES_Score_10', ascending=False)
+    
+    return df
+
+# --- 3. HIRING STRATEGY RECOMMENDATIONS ---
+
+def get_hiring_strategy(timing_type):
+    """Maps the market timing to a specific hiring strategy for a startup."""
+    
+    # Mapping based on startup cultural fit and efficiency
+    strategies = {
+        'Retail/Tech Day (11am-8pm)': {
+            'focus': 'Consumer & Flexibility Talent',
+            'guidance': 'Optimal for hiring students seeking *flexible* hours and deep market exposure. Target those interested in sales, front-end development, and customer engagement roles.'
+        },
+        'Tech/Flex Day (10am-7pm)': {
+            'focus': 'Agile & Hybrid Talent',
+            'guidance': 'Attracts **self-starters** and product-focused candidates who value output over desk time. Ideal for engineering, product, and design roles.'
+        },
+        'Local Business Day (10am-7pm)': {
+            'focus': 'Local Services & Finance Talent',
+            'guidance': 'Good for sourcing talent for administrative, accounting, or local B2B service roles. Focus on universities with strong commerce programs.'
+        },
+        'Industrial Day (9am-6pm)': {
+            'focus': 'Operations & Supply Chain Talent',
+            'guidance': 'Best for sourcing candidates for logistics, manufacturing, and hardware/operations roles. Culture may be more structured.'
+        },
+        'Corporate B2B Day (9am-6pm)': {
+            'focus': 'Structured Internships & Mid-Career Talent',
+            'guidance': 'Suitable for highly structured internship programs or attracting mid-career professionals seeking stable, well-defined corporate hours.'
+        },
+        'Global B2B/Airport (24hr)': {
+            'focus': 'International & High-Security Talent',
+            'guidance': 'Target talent interested in global operations, finance, or aviation-related tech. Expect higher salary demands due to location prestige.'
+        },
+        'Standard B2B Day (10am-7pm)': {
+            'focus': 'Consulting & Policy Talent',
+            'guidance': 'Attracts students interested in consulting, policy, or finance. Use the prestigious location (e.g., CP) as a major draw.'
+        },
+        'Low Activity': {
+            'focus': 'Remote or Niche Talent',
+            'guidance': 'Avoid heavy student recruiting here. Focus on remote or highly niche skills, accepting that the location offers minimal inherent talent attraction benefits.'
+        }
+    }
+    return strategies.get(timing_type, {'focus': 'General Talent', 'guidance': 'General hiring strategy applies.'})
+
+# --- MAIN EXECUTION ---
+if __name__ == '__main__':
+    # 1. Load Data
+    office_df = get_micro_market_data()
+    
+    # 2. Calculate TAES
+    results_df = calculate_taes_score(office_df.copy())
+    
+    # --- OUTPUT PRESENTATION ---
+    print("## 🎓 Talent Acquisition Efficiency Analysis (TAES)")
+    print("### Ranking Locations for Optimal Startup Hiring (Prioritizing Talent Density & Cost Efficiency)")
+    print("---")
+    
+    # Renaming the score column for clean presentation
+    table_output = results_df.head(10).rename(columns={'TAES_Score_10': 'TAES Score (10.00)'})
+    
+    # Define the columns to display (Metro Score is REMOVED from display)
+    table_cols_display = ['Micro_Market', 'TAES Score (10.00)', 'Proximity_to_Colleges', 'Avg_Rent_Per_SqFt']
+
+    print("#### 🥇 Top 10 Markets Ranked by TAES Score:")
+    # Using the correct column list on the output DataFrame
+    print(table_output[table_cols_display].round(4).to_markdown(index=False))
+    
+    print("\n---")
+    
+    # Detailed Analysis for Top 3
+    print("#### 🧠 Strategic Hiring Recommendations (Top 3):")
+    
+    for rank, row in table_output.head(3).iterrows():
+        market = row['Micro_Market']
+        # Accessing the renamed column for score display
+        score = row['TAES Score (10.00)'] 
+        timing_type = row['Peak_Efficiency_Timing']
+        strategy = get_hiring_strategy(timing_type)
+        
+        print(f"\n--- Rank {rank + 1}: {market} (Score: {score:.2f}/10.00) ---")
+        print(f"**Market Type (Timing):** {timing_type}")
+        print(f"**Talent Focus:** {strategy['focus']}")
+        print(f"**Actionable Guidance:** {strategy['guidance']}")
+        
+    print("\n---")
+    
+    top_recommendation = results_df.iloc[0]
+    print(f"🥇 **Highest Efficiency Location:** {top_recommendation['Micro_Market']}")
+    print(f"   *This location provides the best balance of low cost and high talent density, ideal for volume hiring of entry-level employees.*")

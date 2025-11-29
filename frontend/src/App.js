@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { AlertCircle, TrendingUp, TrendingDown, MapPin, Calendar, AlertTriangle, Loader } from 'lucide-react';
 import axios from 'axios';
 
@@ -24,7 +24,6 @@ const BusinessFeasibilityTool = () => {
     setError(null);
     
     try {
-      // Updated to use full API URL with /api prefix
       const response = await axios.post(`${API_URL}/api/analyze`, {
         businessType,
         location,
@@ -33,22 +32,18 @@ const BusinessFeasibilityTool = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 30000, // 30 second timeout
+        timeout: 30000,
       });
 
       setAnalysis(response.data);
     } catch (err) {
-      // Enhanced error handling
       if (err.code === 'ECONNABORTED') {
         setError('Request timeout. The server took too long to respond. Please try again.');
       } else if (err.response) {
-        // Server responded with error
         setError(err.response?.data?.error || `Server error: ${err.response.status}. Please try again.`);
       } else if (err.request) {
-        // Request made but no response
         setError('Unable to reach the server. Please check your connection and try again.');
       } else {
-        // Something else happened
         setError('Failed to analyze location. Please try again.');
       }
       console.error('Analysis error:', err);
@@ -74,7 +69,6 @@ const BusinessFeasibilityTool = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 via-indigo-50 to-purple-50 p-4 md:p-8">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl md:text-5xl font-bold text-indigo-900 mb-3">
             Delhi Business Feasibility Tool
@@ -85,14 +79,12 @@ const BusinessFeasibilityTool = () => {
           <p className="text-sm text-gray-500 mt-2">
             Powered by real-time future development data
           </p>
-          {/* API Status Indicator */}
           <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500">
             <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
             <span>Connected to API: {API_URL}</span>
           </div>
         </div>
 
-        {/* Input Form */}
         <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 mb-8 border border-indigo-100">
           <h2 className="text-2xl font-semibold mb-6 text-gray-800 flex items-center gap-2">
             <MapPin className="w-6 h-6 text-indigo-600" />
@@ -164,10 +156,8 @@ const BusinessFeasibilityTool = () => {
           </button>
         </div>
 
-        {/* Results */}
         {analysis && (
           <div className="space-y-6">
-            {/* Risk Assessment */}
             <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
               <h2 className="text-2xl font-semibold mb-6 text-gray-800">Risk Assessment</h2>
               
@@ -204,7 +194,6 @@ const BusinessFeasibilityTool = () => {
               </div>
             </div>
 
-            {/* Future Events */}
             <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
               <h2 className="text-2xl font-semibold mb-6 text-gray-800">
                 Future Impact Events ({analysis.events.length})
@@ -273,7 +262,6 @@ const BusinessFeasibilityTool = () => {
               )}
             </div>
 
-            {/* 10-Year Projection */}
             <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
               <h2 className="text-2xl font-semibold mb-6 text-gray-800">
                 10-Year Success Projection
@@ -293,3 +281,117 @@ const BusinessFeasibilityTool = () => {
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />
+                  <XAxis 
+                    dataKey="year" 
+                    stroke="#6b7280"
+                    style={{ fontSize: '12px' }}
+                  />
+                  <YAxis 
+                    domain={[0, 100]} 
+                    stroke="#6b7280"
+                    style={{ fontSize: '12px' }}
+                    label={{ 
+                      value: 'Success Probability (%)', 
+                      angle: -90, 
+                      position: 'insideLeft',
+                      style: { fontSize: '12px', fill: '#6b7280' }
+                    }} 
+                  />
+                  <Tooltip 
+                    contentStyle={{ 
+                      backgroundColor: 'white', 
+                      border: '1px solid #e5e7eb',
+                      borderRadius: '8px',
+                      boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
+                    }}
+                  />
+                  <Legend />
+                  <Area 
+                    type="monotone" 
+                    dataKey="probability" 
+                    stroke="#10b981" 
+                    strokeWidth={2}
+                    fill="url(#colorProb)"
+                    name="Success Probability (%)"
+                  />
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+
+            {analysis.riskScore > 40 && (
+              <div className="bg-gradient-to-br from-orange-50 to-red-50 rounded-xl shadow-2xl p-6 md:p-8 border-2 border-orange-200">
+                <div className="flex items-center gap-3 mb-6">
+                  <AlertTriangle className="w-8 h-8 text-orange-600" />
+                  <h2 className="text-2xl font-semibold text-gray-800">Recommendations</h2>
+                </div>
+                
+                {analysis.alternatives && analysis.alternatives.length > 0 && (
+                  <div className="mb-8">
+                    <h3 className="text-lg font-semibold mb-4 text-gray-700">
+                      🎯 Alternative Locations (Lower Risk)
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {analysis.alternatives.map((alt, idx) => (
+                        <div 
+                          key={idx} 
+                          className="bg-white border-2 border-gray-200 rounded-lg p-5 hover:shadow-lg hover:border-indigo-300 transition-all cursor-pointer"
+                        >
+                          <div className="flex items-start justify-between mb-3">
+                            <h4 className="font-semibold text-indigo-600 text-lg">{alt.area}</h4>
+                            <span className="bg-green-100 text-green-700 text-xs font-bold px-3 py-1 rounded-full">
+                              {alt.risk}% Risk
+                            </span>
+                          </div>
+                          <p className="text-sm text-gray-600 mb-3">{alt.reason}</p>
+                          <div className="text-xs text-gray-500 flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            <span>PIN: {alt.pincode}</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {analysis.alternateBusiness && analysis.alternateBusiness.length > 0 && (
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4 text-gray-700">
+                      💡 Alternative Business Types for This Location
+                    </h3>
+                    <div className="space-y-3">
+                      {analysis.alternateBusiness.map((biz, idx) => (
+                        <div 
+                          key={idx} 
+                          className="flex items-start gap-3 bg-white p-4 rounded-lg border border-gray-200 hover:border-indigo-300 transition-all"
+                        >
+                          <AlertCircle className="w-6 h-6 text-indigo-600 flex-shrink-0 mt-1" />
+                          <div>
+                            <p className="font-semibold text-gray-800 text-lg">{biz.type}</p>
+                            <p className="text-sm text-gray-600 mt-1">{biz.reason}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {analysis.riskScore <= 40 && (
+              <div className="bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl shadow-xl p-6 border-2 border-green-200 text-center">
+                <div className="text-green-600 text-6xl mb-3">✓</div>
+                <h3 className="text-2xl font-bold text-gray-800 mb-2">Great Choice!</h3>
+                <p className="text-gray-600">
+                  This location shows favorable conditions for your {businessType} business.
+                  The risk score of {analysis.riskScore}% indicates good growth potential.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default BusinessFeasibilityTool;

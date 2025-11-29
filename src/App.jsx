@@ -19,23 +19,13 @@ export default function BusinessLocationAnalyzer() {
   const [loadingMap, setLoadingMap] = useState(true);
 
   useEffect(() => {
-    // Load map data
-    setLoadingMap(true);
-    Promise.all([
-      fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_city.geojson').then(r => r.json()),
-      fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_pincode.geojson').then(r => r.json()),
-      fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_area.geojson').then(r => r.json()),
-      fetch('https://tiles-v2.latlong.in/blue_essence.json').then(r => r.json())
-    ]).then(([city, pincode, area, style]) => {
-      setMapData(city);
-      setPincodeData(pincode);
-      setAreaData(area);
-      setMapStyle(style);
-      setLoadingMap(false);
-    }).catch(err => {
-      console.error('Error loading map data:', err);
-      setLoadingMap(false);
-    });
+    // Map data loading disabled due to CORS restrictions
+    // Will be enabled when map visualization is implemented
+    setLoadingMap(false);
+    setMapData({ type: 'FeatureCollection', features: [] });
+    setPincodeData({ type: 'FeatureCollection', features: [] });
+    setAreaData({ type: 'FeatureCollection', features: [] });
+    setMapStyle({});
   }, []);
 
   const businessCategories = [
@@ -489,7 +479,7 @@ export default function BusinessLocationAnalyzer() {
               )}
             </div>
 
-            {/* Map Data Info */}
+            {/* Status Info */}
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
@@ -497,9 +487,7 @@ export default function BusinessLocationAnalyzer() {
                   <p className="font-semibold mb-1">Status:</p>
                   <ul className="list-disc list-inside space-y-1 text-xs">
                     <li>API: {apiKey ? '✓ Connected' : '✗ Not configured'}</li>
-                    <li>City Map: {mapData ? '✓' : loadingMap ? '⟳' : '✗'}</li>
-                    <li>Pincodes: {pincodeData ? '✓' : loadingMap ? '⟳' : '✗'}</li>
-                    <li>Areas: {areaData ? '✓' : loadingMap ? '⟳' : '✗'}</li>
+                    <li>Ready for analysis</li>
                   </ul>
                 </div>
               </div>

@@ -29,7 +29,7 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng) => {
   // We use the flash model for speed. 
   // Note: Google Maps Grounding is an Enterprise/Vertex feature. 
   // For standard keys, Gemini will use its training data (which is very good for general knowledge).
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
     I want to open a "${businessType}" at coordinates ${lat}, ${lng} in Delhi, India.

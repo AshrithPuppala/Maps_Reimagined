@@ -27,27 +27,10 @@ export default function BusinessLocationAnalyzer() {
   }, []);
 
   const businessCategories = [
-    'Restaurant',
-    'Cafe',
-    'Retail Store',
-    'Grocery',
-    'Supermarket',
-    'Pharmacy',
-    'Gym',
-    'Fitness Center',
-    'Salon',
-    'Spa',
-    'Electronics Store',
-    'Clothing Store',
-    'Bakery',
-    'Bookstore',
-    'Medical Clinic',
-    'Hospital',
-    'School',
-    'Bank',
-    'ATM',
-    'Hotel',
-    'Gas Station'
+    'Restaurant', 'Cafe', 'Retail Store', 'Grocery', 'Supermarket', 'Pharmacy',
+    'Gym', 'Fitness Center', 'Salon', 'Spa', 'Electronics Store', 'Clothing Store',
+    'Bakery', 'Bookstore', 'Medical Clinic', 'Hospital', 'School', 'Bank', 'ATM',
+    'Hotel', 'Gas Station'
   ];
 
   const searchLocation = async (query) => {
@@ -59,22 +42,13 @@ export default function BusinessLocationAnalyzer() {
     try {
       const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(query)}`;
       console.log('🔍 SEARCH REQUEST:', {
-        url: url,
-        query: query,
-        apiKeyPresent: !!apiKey,
-        apiKeyLength: apiKey.length,
-        headers: {
-          'X-Authorization-Token': apiKey.substring(0, 10) + '...',
-          'Accept': 'application/json'
-        }
+        url, query, apiKeyPresent: !!apiKey, apiKeyLength: apiKey.length,
+        headers: { 'X-Authorization-Token': apiKey.substring(0, 10) + '...', 'Accept': 'application/json' }
       });
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'X-Authorization-Token': apiKey,
-          'Accept': 'application/json'
-        }
+        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
       });
       
       console.log('📡 SEARCH RESPONSE STATUS:', response.status, response.statusText);
@@ -89,14 +63,8 @@ export default function BusinessLocationAnalyzer() {
           );
           
           const suggestions = (delhiResults.length > 0 ? delhiResults : result.data).map(item => ({
-            properties: {
-              name: item.name,
-              display_name: item.name,
-              geoid: item.geo
-            },
-            geometry: {
-              coordinates: [77.2090, 28.6139]
-            }
+            properties: { name: item.name, display_name: item.name, geoid: item.geo },
+            geometry: { coordinates: [77.2090, 28.6139] }
           }));
           setLocationSuggestions(suggestions.slice(0, 8));
         } else {
@@ -105,12 +73,7 @@ export default function BusinessLocationAnalyzer() {
         }
       } else {
         const errorText = await response.text();
-        console.error('❌ SEARCH API ERROR:', {
-          status: response.status,
-          statusText: response.statusText,
-          errorBody: errorText,
-          url: url
-        });
+        console.error('❌ SEARCH API ERROR:', { status: response.status, statusText: response.statusText, errorBody: errorText, url });
         if (response.status === 401) {
           alert('Invalid API Key. Please check your Latlong API key and try again.');
           setApiKey('');
@@ -126,29 +89,19 @@ export default function BusinessLocationAnalyzer() {
 
   useEffect(() => {
     const timer = setTimeout(() => {
-      if (targetArea && apiKey) {
-        searchLocation(targetArea);
-      }
+      if (targetArea && apiKey) searchLocation(targetArea);
     }, 500);
-    
     return () => clearTimeout(timer);
   }, [targetArea, apiKey]);
 
   const getLocationDetailsFromGeoid = async (geoid) => {
     try {
       const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${geoid}`;
-      console.log('🔍 GEOCODER REQUEST:', {
-        url: url,
-        geoid: geoid,
-        apiKeyPresent: !!apiKey
-      });
+      console.log('🔍 GEOCODER REQUEST:', { url, geoid, apiKeyPresent: !!apiKey });
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'X-Authorization-Token': apiKey,
-          'Accept': 'application/json'
-        }
+        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
       });
       
       console.log('📡 GEOCODER RESPONSE STATUS:', response.status);
@@ -171,20 +124,11 @@ export default function BusinessLocationAnalyzer() {
   const searchNearbyBusinesses = async (lat, lon, businessType) => {
     try {
       const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(businessType)}`;
-      console.log('🔍 BUSINESS SEARCH REQUEST:', {
-        url: url,
-        lat: lat,
-        lon: lon,
-        businessType: businessType,
-        apiKeyPresent: !!apiKey
-      });
+      console.log('🔍 BUSINESS SEARCH REQUEST:', { url, lat, lon, businessType, apiKeyPresent: !!apiKey });
       
       const response = await fetch(url, {
         method: 'GET',
-        headers: {
-          'X-Authorization-Token': apiKey,
-          'Accept': 'application/json'
-        }
+        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
       });
       
       console.log('📡 BUSINESS SEARCH RESPONSE STATUS:', response.status);
@@ -221,17 +165,12 @@ export default function BusinessLocationAnalyzer() {
     
     try {
       const geoid = selectedLocation.properties.geoid;
-      
       console.log('🚀 STARTING ANALYSIS:', {
-        businessType: businessType,
-        selectedLocation: selectedLocation.properties.name,
-        geoid: geoid,
-        apiKeyPresent: !!apiKey,
-        apiKeyFirst10: apiKey.substring(0, 10) + '...'
+        businessType, selectedLocation: selectedLocation.properties.name, geoid,
+        apiKeyPresent: !!apiKey, apiKeyFirst10: apiKey.substring(0, 10) + '...'
       });
       
       const locationDetails = await getLocationDetailsFromGeoid(geoid);
-      
       console.log('📍 LOCATION DETAILS:', locationDetails);
       
       if (!locationDetails || !locationDetails.lat || !locationDetails.lon) {
@@ -243,20 +182,14 @@ export default function BusinessLocationAnalyzer() {
       
       const lat = parseFloat(locationDetails.lat);
       const lon = parseFloat(locationDetails.lon);
-      
       console.log('✅ COORDINATES EXTRACTED:', { lat, lon });
       
       const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
-      
-      console.log('💼 FOUND BUSINESSES:', {
-        count: nearbyBusinesses.length,
-        businesses: nearbyBusinesses
-      });
+      console.log('💼 FOUND BUSINESSES:', { count: nearbyBusinesses.length, businesses: nearbyBusinesses });
       
       const competitors = nearbyBusinesses.length;
       const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
         const distance = business.distance || `${(Math.random() * 2).toFixed(2)} km`;
-        
         return {
           name: business.name || `${businessType} ${idx + 1}`,
           distance: typeof distance === 'number' ? `${(distance/1000).toFixed(2)} km` : distance,
@@ -278,7 +211,6 @@ export default function BusinessLocationAnalyzer() {
       const locationParts = locationName.split(',').map(s => s.trim());
       
       const recommendations = [];
-      
       if (marketSaturation > 70) {
         recommendations.push('⚠️ High competition detected. Strong differentiation strategy required. Consider unique offerings or niche positioning.');
       } else if (marketSaturation > 40) {
@@ -304,12 +236,7 @@ export default function BusinessLocationAnalyzer() {
       }
       
       setAnalysis({
-        competitors,
-        avgRating,
-        avgRevenue,
-        footfall,
-        marketSaturation,
-        topCompetitors,
+        competitors, avgRating, avgRevenue, footfall, marketSaturation, topCompetitors,
         demographics: {
           area: locationParts[locationParts.length - 1] || 'Delhi',
           locality: locationParts[0] || selectedLocation.properties.name,
@@ -321,11 +248,7 @@ export default function BusinessLocationAnalyzer() {
       });
       
     } catch (error) {
-      console.error('❌❌❌ ANALYSIS ERROR:', {
-        error: error,
-        message: error.message,
-        stack: error.stack
-      });
+      console.error('❌❌❌ ANALYSIS ERROR:', { error, message: error.message, stack: error.stack });
       alert('Error analyzing location. Please check console for details and verify your API key.');
     } finally {
       setAnalyzing(false);
@@ -389,13 +312,7 @@ export default function BusinessLocationAnalyzer() {
               </div>
               <p className="text-gray-600 ml-11">Real-time competitor analysis powered by Latlong API</p>
             </div>
-            <button
-              onClick={() => {
-                setApiKey('');
-                setShowApiInput(true);
-              }}
-              className="text-sm text-indigo-600 hover:text-indigo-700 underline"
-            >
+            <button onClick={() => { setApiKey(''); setShowApiInput(true); }} className="text-sm text-indigo-600 hover:text-indigo-700 underline">
               Change API Key
             </button>
           </div>
@@ -410,38 +327,21 @@ export default function BusinessLocationAnalyzer() {
             
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Business Type *
-                </label>
-                <select
-                  value={businessType}
-                  onChange={(e) => setBusinessType(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
+                <label className="block text-sm font-medium text-gray-700 mb-2">Business Type *</label>
+                <select value={businessType} onChange={(e) => setBusinessType(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                   <option value="">Select business type</option>
-                  {businessCategories.map(cat => (
-                    <option key={cat} value={cat}>{cat}</option>
-                  ))}
+                  {businessCategories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
                 </select>
               </div>
 
               <div className="relative">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Target Area/Location *
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-2">Target Area/Location *</label>
                 <div className="relative">
                   <input
                     type="text"
                     value={targetArea}
-                    onChange={(e) => {
-                      setTargetArea(e.target.value);
-                      setSelectedLocation(null);
-                    }}
-                    onFocus={() => {
-                      if (targetArea && targetArea.length >= 2) {
-                        searchLocation(targetArea);
-                      }
-                    }}
+                    onChange={(e) => { setTargetArea(e.target.value); setSelectedLocation(null); }}
+                    onFocus={() => { if (targetArea && targetArea.length >= 2) searchLocation(targetArea); }}
                     placeholder="Type area name (e.g., Connaught Place, Karol Bagh)"
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                   />
@@ -454,17 +354,9 @@ export default function BusinessLocationAnalyzer() {
                 {locationSuggestions.length > 0 && (
                   <div className="absolute z-20 w-full mt-1 bg-white border border-gray-300 rounded-lg shadow-xl max-h-80 overflow-y-auto">
                     {locationSuggestions.map((suggestion, idx) => (
-                      <div
-                        key={idx}
-                        onClick={() => selectLocation(suggestion)}
-                        className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors"
-                      >
-                        <p className="font-medium text-gray-800 text-sm">
-                          {suggestion.properties.name || suggestion.properties.display_name}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">
-                          {suggestion.properties.display_name}
-                        </p>
+                      <div key={idx} onClick={() => selectLocation(suggestion)} className="px-4 py-3 hover:bg-indigo-50 cursor-pointer border-b last:border-b-0 transition-colors">
+                        <p className="font-medium text-gray-800 text-sm">{suggestion.properties.name || suggestion.properties.display_name}</p>
+                        <p className="text-xs text-gray-500 mt-1 line-clamp-2">{suggestion.properties.display_name}</p>
                       </div>
                     ))}
                   </div>
@@ -475,76 +367,30 @@ export default function BusinessLocationAnalyzer() {
                 {selectedLocation && (
                   <div className="flex items-center gap-1 mt-1">
                     <p className="text-xs text-green-600">✓ Location selected</p>
-                    <button
-                      onClick={() => {
-                        setSelectedLocation(null);
-                        setTargetArea('');
-                      }}
-                      className="text-xs text-red-600 hover:underline ml-2"
-                    >
-                      Clear
-                    </button>
+                    <button onClick={() => { setSelectedLocation(null); setTargetArea(''); }} className="text-xs text-red-600 hover:underline ml-2">Clear</button>
                   </div>
                 )}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Investment Budget (₹)
-                </label>
-                <input
-                  type="number"
-                  value={investment}
-                  onChange={(e) => setInvestment(e.target.value)}
-                  placeholder="e.g., 2000000"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
+                <label className="block text-sm font-medium text-gray-700 mb-2">Investment Budget (₹)</label>
+                <input type="number" value={investment} onChange={(e) => setInvestment(e.target.value)} placeholder="e.g., 2000000" className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent" />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Map Layer
-                </label>
-                <select
-                  value={selectedLayer}
-                  onChange={(e) => setSelectedLayer(e.target.value)}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                >
+                <label className="block text-sm font-medium text-gray-700 mb-2">Map Layer</label>
+                <select value={selectedLayer} onChange={(e) => setSelectedLayer(e.target.value)} className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
                   <option value="city">City Boundaries</option>
                   <option value="pincode">Pincode Areas</option>
                   <option value="area">Locality Areas</option>
                 </select>
               </div>
 
-              <button
-                onClick={analyzeLocation}
-                disabled={analyzing}
-                className={`w-full py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${
-                  analyzing 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : !businessType || !selectedLocation
-                    ? 'bg-indigo-400 hover:bg-indigo-500 cursor-pointer'
-                    : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'
-                } text-white`}
-              >
-                {analyzing ? (
-                  <>
-                    <Loader className="w-5 h-5 animate-spin" />
-                    Analyzing Real Data...
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-5 h-5" />
-                    Analyze Location
-                  </>
-                )}
+              <button onClick={analyzeLocation} disabled={analyzing} className={`w-full py-3 rounded-lg font-semibold transition-colors flex items-center justify-center gap-2 ${analyzing ? 'bg-gray-400 cursor-not-allowed' : !businessType || !selectedLocation ? 'bg-indigo-400 hover:bg-indigo-500 cursor-pointer' : 'bg-indigo-600 hover:bg-indigo-700 cursor-pointer'} text-white`}>
+                {analyzing ? (<><Loader className="w-5 h-5 animate-spin" />Analyzing Real Data...</>) : (<><Search className="w-5 h-5" />Analyze Location</>)}
               </button>
-              {!businessType && (
-                <p className="text-xs text-red-500 mt-1">Please select a business type</p>
-              )}
-              {businessType && !selectedLocation && (
-                <p className="text-xs text-red-500 mt-1">Please select a location from suggestions</p>
-              )}
+              {!businessType && <p className="text-xs text-red-500 mt-1">Please select a business type</p>}
+              {businessType && !selectedLocation && <p className="text-xs text-red-500 mt-1">Please select a location from suggestions</p>}
             </div>
 
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
@@ -583,7 +429,6 @@ export default function BusinessLocationAnalyzer() {
                     <p className="text-2xl font-bold text-gray-800">{analysis.competitors}</p>
                     <p className="text-xs text-gray-500 mt-1">within 2 km radius</p>
                   </div>
-
                   <div className="bg-white rounded-xl shadow-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <TrendingUp className="w-5 h-5 text-green-600" />
@@ -592,7 +437,6 @@ export default function BusinessLocationAnalyzer() {
                     <p className="text-2xl font-bold text-gray-800">{analysis.avgRating}</p>
                     <p className="text-xs text-gray-500 mt-1">out of 5.0</p>
                   </div>
-
                   <div className="bg-white rounded-xl shadow-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Users className="w-5 h-5 text-blue-600" />
@@ -601,7 +445,6 @@ export default function BusinessLocationAnalyzer() {
                     <p className="text-2xl font-bold text-gray-800">{analysis.footfall.toLocaleString()}</p>
                     <p className="text-xs text-gray-500 mt-1">daily average</p>
                   </div>
-
                   <div className="bg-white rounded-xl shadow-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <DollarSign className="w-5 h-5 text-orange-600" />
@@ -618,36 +461,23 @@ export default function BusinessLocationAnalyzer() {
                     Analyzed Location
                   </h3>
                   <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-indigo-200 mb-1">Area</p>
-                      <p className="font-semibold">{analysis.demographics.area}</p>
-                    </div>
-                    <div>
-                      <p className="text-indigo-200 mb-1">Locality</p>
-                      <p className="font-semibold">{analysis.demographics.locality}</p>
-                    </div>
-                    <div>
-                      <p className="text-indigo-200 mb-1">Pincode</p>
-                      <p className="font-semibold">{analysis.demographics.pincode}</p>
-                    </div>
+                    <div><p className="text-indigo-200 mb-1">Area</p><p className="font-semibold">{analysis.demographics.area}</p></div>
+                    <div><p className="text-indigo-200 mb-1">Locality</p><p className="font-semibold">{analysis.demographics.locality}</p></div>
+                    <div><p className="text-indigo-200 mb-1">Pincode</p><p className="font-semibold">{analysis.demographics.pincode}</p></div>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-2xl shadow-xl p-6">
                   <h3 className="text-lg font-bold text-gray-800 mb-4">
                     Top {Math.min(5, analysis.topCompetitors.length)} Nearby Competitors
-                    <span className="text-sm font-normal text-gray-500 ml-2">
-                      ({analysis.totalBusinessesFound} total found)
-                    </span>
+                    <span className="text-sm font-normal text-gray-500 ml-2">({analysis.totalBusinessesFound} total found)</span>
                   </h3>
                   {analysis.topCompetitors.length > 0 ? (
                     <div className="space-y-3">
                       {analysis.topCompetitors.map((comp, idx) => (
                         <div key={idx} className="flex items-start justify-between p-4 bg-gradient-to-r from-gray-50 to-white rounded-lg hover:shadow-md transition-shadow border border-gray-100">
                           <div className="flex items-start gap-3">
-                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-semibold flex-shrink-0">
-                              {idx + 1}
-                            </div>
+                            <div className="w-8 h-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-semibold flex-shrink-0">{idx + 1}</div>
                             <div>
                               <p className="font-semibold text-gray-800">{comp.name}</p>
                               <p className="text-sm text-gray-500 mt-1">{comp.distance} away</p>
@@ -677,3 +507,27 @@ export default function BusinessLocationAnalyzer() {
                   </h3>
                   <div className="space-y-3">
                     {analysis.recommendations.map((rec, idx) => (
+                      <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
+                        <div className="text-2xl flex-shrink-0">
+                          {rec.includes('⚠️') ? '⚠️' : rec.includes('✓') ? '✓' : '💡'}
+                        </div>
+                        <p className="text-gray-700 flex-1 leading-relaxed">{rec.replace(/[⚠️✓💡]/g, '').trim()}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="text-center">
+                  <button onClick={analyzeLocation} className="inline-flex items-center gap-2 px-6 py-3 bg-white text-indigo-600 rounded-lg font-semibold hover:bg-indigo-50 transition-colors shadow-lg">
+                    <Search className="w-5 h-5" />
+                    Refresh Analysis
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

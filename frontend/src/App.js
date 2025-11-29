@@ -32,7 +32,7 @@ const BusinessFeasibilityTool = () => {
         headers: {
           'Content-Type': 'application/json',
         },
-        timeout: 30000,
+        timeout: 60000,
       });
 
       setAnalysis(response.data);

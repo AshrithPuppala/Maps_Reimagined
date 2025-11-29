@@ -62,7 +62,7 @@ export default function BusinessLocationAnalyzer() {
     try {
       // Using V2 API which returns {status, data: [{name, geo}]} format
       const response = await fetch(
-        `https://api.latlong.in/v2/au_ete.json?query=${encodeURIComponent(query)}`,
+        `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(query)}`,
         {
           method: 'GET',
           headers: {

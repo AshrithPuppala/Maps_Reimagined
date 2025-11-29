@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import Map, { Source, Layer, NavigationControl, Marker } from 'react-map-gl/maplibre';
+import Map, { NavigationControl, Marker, Source, Layer } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
@@ -7,8 +7,8 @@ import {
 } from 'recharts';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { 
-  MapPin, TrendingUp, TrendingDown, Search, AlertCircle, 
-  Loader2, Building2, Key, Map as MapIcon
+  TrendingUp, TrendingDown, Search, AlertCircle, 
+  Loader2, Building2, Key, Map as MapIcon, Star
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -22,18 +22,18 @@ const LoadingState = {
   ERROR: 'ERROR'
 };
 
-// --- API SERVICES ---
+// --- SERVICES ---
 
 // 1. Geocoding Service (Free OpenStreetMap - No Key Required)
 const searchLocationName = async (query) => {
   try {
-    // We append "Delhi" to ensure results are relevant
+    const searchQuery = query.toLowerCase().includes('delhi') ? query : `${query} Delhi`;
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5`
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery)}&limit=5`
     );
     const data = await response.json();
     return data.map(item => ({
-      name: item.display_name.split(',')[0], // Short name
+      name: item.display_name.split(',')[0],
       fullName: item.display_name,
       lat: parseFloat(item.lat),
       lon: parseFloat(item.lon)
@@ -47,7 +47,8 @@ const searchLocationName = async (query) => {
 // 2. Gemini Analysis Service
 const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locationName) => {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  // Using 1.5-flash as it is the current standard efficient model
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
   const prompt = `
     I want to open a "${businessType}" at coordinates ${lat}, ${lng} (Near ${locationName}) in Delhi, India.
@@ -82,6 +83,7 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
+  // Cleanup markdown formatting if Gemini adds it
   const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
   return JSON.parse(jsonString);
 };
@@ -157,12 +159,12 @@ const Sidebar = ({
               value={apiKey}
               onChange={(e) => setApiKey(e.target.value)}
               placeholder="Paste Google Gemini Key"
-              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none placeholder-slate-500"
             />
           </div>
         </div>
 
-        {/* Location Search Input (From old code) */}
+        {/* Location Search */}
         <div className="space-y-2 relative">
           <label className="text-xs font-medium text-slate-400 uppercase">2. Target Location</label>
           <div className="relative">
@@ -175,7 +177,7 @@ const Sidebar = ({
                 if(e.target.value.length > 2) onLocationSearch(e.target.value);
               }}
               placeholder="Search Area (e.g. Connaught Place)"
-              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none placeholder-slate-500"
             />
           </div>
           {/* Suggestions Dropdown */}
@@ -195,7 +197,7 @@ const Sidebar = ({
           )}
         </div>
 
-        {/* Business Type Input */}
+        {/* Business Type */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-slate-400 uppercase">3. Business Type</label>
           <div className="flex gap-2">
@@ -273,8 +275,8 @@ const Sidebar = ({
                       <p className="text-[10px] text-slate-500 truncate max-w-[150px]">{comp.address}</p>
                     </div>
                     <div className="flex items-center bg-slate-900 px-2 py-1 rounded">
-                      <span className="text-yellow-400 text-xs font-bold">★</span>
-                      <span className="text-xs text-white ml-1">{comp.rating}</span>
+                      <Star className="w-3 h-3 text-yellow-400 fill-yellow-400 mr-1" />
+                      <span className="text-xs text-white">{comp.rating}</span>
                     </div>
                   </div>
                 ))}
@@ -287,7 +289,7 @@ const Sidebar = ({
   );
 };
 
-// --- MAIN APP COMPONENT ---
+// --- MAIN APP ---
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
@@ -296,7 +298,6 @@ export default function App() {
   // Map & Location State
   const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
   const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 12 });
-  const [geoData, setGeoData] = useState({ city: null, area: null });
   
   // Search State
   const [locationQuery, setLocationQuery] = useState('');
@@ -307,33 +308,19 @@ export default function App() {
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState(null);
 
-  // Load Map Polygons
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [cityRes, areaRes] = await Promise.all([
-          fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_city.geojson'),
-          fetch('https://d3ucb59hn6tk5w.cloudfront.net/delhi_area.geojson')
-        ]);
-        setGeoData({ city: await cityRes.json(), area: await areaRes.json() });
-      } catch (e) { console.error("Map data error", e); }
-    };
-    fetchData();
-  }, []);
-
-  // Handle Location Search (Geocoding)
+  // Handle Location Search
   const handleLocationSearch = useCallback(async (query) => {
     const results = await searchLocationName(query);
     setLocationSuggestions(results);
   }, []);
 
-  // Handle Selecting a Location from Dropdown
+  // Handle Selecting a Location
   const handleSelectLocation = (suggestion) => {
     const newCoords = { latitude: suggestion.lat, longitude: suggestion.lon };
     setSelectedLocation(newCoords);
-    setViewState({ ...newCoords, zoom: 14 }); // Fly to location
+    setViewState({ ...newCoords, zoom: 14 }); 
     setLocationQuery(suggestion.name);
-    setLocationSuggestions([]); // Close dropdown
+    setLocationSuggestions([]);
   };
 
   // Handle Analysis
@@ -361,7 +348,7 @@ export default function App() {
   const onMapClick = (evt) => {
     const { lng, lat } = evt.lngLat;
     setSelectedLocation({ latitude: lat, longitude: lng });
-    setLocationQuery("Custom Map Pin"); // Reset text input when clicking map
+    setLocationQuery("Custom Map Pin"); 
   };
 
   return (
@@ -377,7 +364,6 @@ export default function App() {
                 error={error}
                 apiKey={apiKey}
                 setApiKey={setApiKey}
-                // New Search Props
                 locationQuery={locationQuery}
                 setLocationQuery={setLocationQuery}
                 onLocationSearch={handleLocationSearch}
@@ -408,17 +394,6 @@ export default function App() {
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-2 bg-black/50 blur-sm rounded-full" />
              </div>
           </Marker>
-
-          {geoData.city && (
-             <Source id="delhi-city" type="geojson" data={geoData.city}>
-               <Layer id="city-fill" type="fill" paint={{ 'fill-color': '#3b82f6', 'fill-opacity': 0.05 }} />
-             </Source>
-          )}
-          {geoData.area && (
-             <Source id="delhi-area" type="geojson" data={geoData.area}>
-               <Layer id="area-line" type="line" paint={{ 'line-color': '#34d399', 'line-width': 1, 'line-opacity': 0.3 }} />
-             </Source>
-          )}
         </Map>
       </div>
     </div>

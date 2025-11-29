@@ -1,0 +1,9 @@
+Flask==3.0.0
+flask-cors==4.0.0
+geopandas==0.14.1
+shapely==2.0.2
+pandas==2.1.4
+numpy==1.26.2
+gunicorn==21.2.0
+fiona==1.9.5
+pyproj==3.6.1

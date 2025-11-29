@@ -19,8 +19,6 @@ export default function BusinessLocationAnalyzer() {
   const [loadingMap, setLoadingMap] = useState(true);
 
   useEffect(() => {
-    // Map data loading disabled due to CORS restrictions
-    // Will be enabled when map visualization is implemented
     setLoadingMap(false);
     setMapData({ type: 'FeatureCollection', features: [] });
     setPincodeData({ type: 'FeatureCollection', features: [] });
@@ -52,7 +50,6 @@ export default function BusinessLocationAnalyzer() {
     'Gas Station'
   ];
 
-  // Autocomplete search for locations using V2 API (correct endpoint)
   const searchLocation = async (query) => {
     if (!query || query.length < 2 || !apiKey) {
       setLocationSuggestions([]);
@@ -60,24 +57,33 @@ export default function BusinessLocationAnalyzer() {
     }
     
     try {
-      // Using V2 API which returns {status, data: [{name, geo}]} format
-      const response = await fetch(
-        `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(query)}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Authorization-Token': apiKey,
-            'Accept': 'application/json'
-          }
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(query)}`;
+      console.log('🔍 SEARCH REQUEST:', {
+        url: url,
+        query: query,
+        apiKeyPresent: !!apiKey,
+        apiKeyLength: apiKey.length,
+        headers: {
+          'X-Authorization-Token': apiKey.substring(0, 10) + '...',
+          'Accept': 'application/json'
         }
-      );
+      });
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-Authorization-Token': apiKey,
+          'Accept': 'application/json'
+        }
+      });
+      
+      console.log('📡 SEARCH RESPONSE STATUS:', response.status, response.statusText);
       
       if (response.ok) {
         const result = await response.json();
-        console.log('Autocomplete response:', result);
+        console.log('✅ Autocomplete SUCCESS:', result);
         
         if (result.status === 'Success' && result.data && result.data.length > 0) {
-          // Filter for Delhi locations
           const delhiResults = result.data.filter(item => 
             item.name && item.name.toLowerCase().includes('delhi')
           );
@@ -89,7 +95,7 @@ export default function BusinessLocationAnalyzer() {
               geoid: item.geo
             },
             geometry: {
-              coordinates: [77.2090, 28.6139] // Will be fetched from geocoder later
+              coordinates: [77.2090, 28.6139]
             }
           }));
           setLocationSuggestions(suggestions.slice(0, 8));
@@ -99,7 +105,12 @@ export default function BusinessLocationAnalyzer() {
         }
       } else {
         const errorText = await response.text();
-        console.error('API error:', response.status, errorText);
+        console.error('❌ SEARCH API ERROR:', {
+          status: response.status,
+          statusText: response.statusText,
+          errorBody: errorText,
+          url: url
+        });
         if (response.status === 401) {
           alert('Invalid API Key. Please check your Latlong API key and try again.');
           setApiKey('');
@@ -108,12 +119,11 @@ export default function BusinessLocationAnalyzer() {
         setLocationSuggestions([]);
       }
     } catch (error) {
-      console.error('Error fetching location suggestions:', error);
+      console.error('❌ SEARCH EXCEPTION:', error);
       setLocationSuggestions([]);
     }
   };
 
-  // Debounce location search
   useEffect(() => {
     const timer = setTimeout(() => {
       if (targetArea && apiKey) {
@@ -124,68 +134,79 @@ export default function BusinessLocationAnalyzer() {
     return () => clearTimeout(timer);
   }, [targetArea, apiKey]);
 
-  // Get location details using geoid from autocomplete
   const getLocationDetailsFromGeoid = async (geoid) => {
     try {
-      // Using geocoder API with geoid to get lat/lon and full details
-      const response = await fetch(
-        `https://apihub.latlong.ai/v5/autosuggest.json?query=${geoid}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Authorization-Token': apiKey,
-            'Accept': 'application/json'
-          }
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${geoid}`;
+      console.log('🔍 GEOCODER REQUEST:', {
+        url: url,
+        geoid: geoid,
+        apiKeyPresent: !!apiKey
+      });
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-Authorization-Token': apiKey,
+          'Accept': 'application/json'
         }
-      );
+      });
+      
+      console.log('📡 GEOCODER RESPONSE STATUS:', response.status);
       
       if (response.ok) {
         const result = await response.json();
-        console.log('Geocoder response:', result);
+        console.log('✅ GEOCODER SUCCESS:', result);
         if (result.status === 'Success' && result.data && result.data.length > 0) {
           return result.data[0];
         }
       } else {
-        console.error('Geocoder API error:', response.status, await response.text());
+        console.error('❌ GEOCODER ERROR:', response.status, await response.text());
       }
     } catch (error) {
-      console.error('Error getting location details:', error);
+      console.error('❌ GEOCODER EXCEPTION:', error);
     }
     return null;
   };
 
-  // Search for nearby businesses using landmark API
   const searchNearbyBusinesses = async (lat, lon, businessType) => {
     try {
-      const response = await fetch(
-        `https://apihub.latlong.ai/v5/autosuggest.json?query={encodeURIComponent(businessType)}`,
-        {
-          method: 'GET',
-          headers: {
-            'X-Authorization-Token': apiKey,
-            'Accept': 'application/json'
-          }
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(businessType)}`;
+      console.log('🔍 BUSINESS SEARCH REQUEST:', {
+        url: url,
+        lat: lat,
+        lon: lon,
+        businessType: businessType,
+        apiKeyPresent: !!apiKey
+      });
+      
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'X-Authorization-Token': apiKey,
+          'Accept': 'application/json'
         }
-      );
+      });
+      
+      console.log('📡 BUSINESS SEARCH RESPONSE STATUS:', response.status);
       
       if (response.ok) {
         const result = await response.json();
-        console.log('Landmark response:', result);
+        console.log('✅ BUSINESS SEARCH SUCCESS:', result);
         if (result.status === 'Success' && result.data) {
-          // V2 landmark API returns {north: [], south: [], east: [], west: []}
           const allBusinesses = [
             ...(result.data.north || []),
             ...(result.data.south || []),
             ...(result.data.east || []),
             ...(result.data.west || [])
           ];
+          console.log('📊 Total businesses found:', allBusinesses.length);
           return allBusinesses;
         }
       } else {
-        console.error('Landmark API error:', response.status, await response.text());
+        console.error('❌ BUSINESS SEARCH ERROR:', response.status, await response.text());
       }
     } catch (error) {
-      console.error('Error searching businesses:', error);
+      console.error('❌ BUSINESS SEARCH EXCEPTION:', error);
     }
     return [];
   };
@@ -201,12 +222,20 @@ export default function BusinessLocationAnalyzer() {
     try {
       const geoid = selectedLocation.properties.geoid;
       
-      console.log('Analyzing location with geoid:', geoid);
+      console.log('🚀 STARTING ANALYSIS:', {
+        businessType: businessType,
+        selectedLocation: selectedLocation.properties.name,
+        geoid: geoid,
+        apiKeyPresent: !!apiKey,
+        apiKeyFirst10: apiKey.substring(0, 10) + '...'
+      });
       
-      // First get lat/lon from geoid using geocoder
       const locationDetails = await getLocationDetailsFromGeoid(geoid);
       
+      console.log('📍 LOCATION DETAILS:', locationDetails);
+      
       if (!locationDetails || !locationDetails.lat || !locationDetails.lon) {
+        console.error('❌ Missing coordinates in location details:', locationDetails);
         alert('Could not get location coordinates. Please try another location.');
         setAnalyzing(false);
         return;
@@ -215,17 +244,17 @@ export default function BusinessLocationAnalyzer() {
       const lat = parseFloat(locationDetails.lat);
       const lon = parseFloat(locationDetails.lon);
       
-      console.log('Got coordinates:', { lat, lon });
+      console.log('✅ COORDINATES EXTRACTED:', { lat, lon });
       
-      // Search for nearby competitors using landmark API
       const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
       
-      console.log('Found businesses:', nearbyBusinesses);
+      console.log('💼 FOUND BUSINESSES:', {
+        count: nearbyBusinesses.length,
+        businesses: nearbyBusinesses
+      });
       
-      // Calculate statistics
       const competitors = nearbyBusinesses.length;
       const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
-        // V2 landmark API returns {name, address, distance}
         const distance = business.distance || `${(Math.random() * 2).toFixed(2)} km`;
         
         return {
@@ -237,7 +266,6 @@ export default function BusinessLocationAnalyzer() {
         };
       });
       
-      // Generate insights based on real data
       const avgRating = topCompetitors.length > 0
         ? (topCompetitors.reduce((sum, c) => sum + parseFloat(c.rating), 0) / topCompetitors.length).toFixed(1)
         : (3.5 + Math.random() * 1.5).toFixed(1);
@@ -246,11 +274,9 @@ export default function BusinessLocationAnalyzer() {
       const footfall = Math.floor(1000 + (competitors * 200) + Math.random() * 2000);
       const avgRevenue = Math.floor(200000 + (competitors * 15000) + Math.random() * 300000);
       
-      // Extract location info from response
       const locationName = selectedLocation.properties.display_name || selectedLocation.properties.name;
       const locationParts = locationName.split(',').map(s => s.trim());
       
-      // Generate contextual recommendations
       const recommendations = [];
       
       if (marketSaturation > 70) {
@@ -295,8 +321,12 @@ export default function BusinessLocationAnalyzer() {
       });
       
     } catch (error) {
-      console.error('Error during analysis:', error);
-      alert('Error analyzing location. Please check your API key and try again.');
+      console.error('❌❌❌ ANALYSIS ERROR:', {
+        error: error,
+        message: error.message,
+        stack: error.stack
+      });
+      alert('Error analyzing location. Please check console for details and verify your API key.');
     } finally {
       setAnalyzing(false);
     }
@@ -350,7 +380,6 @@ export default function BusinessLocationAnalyzer() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
         <div className="bg-white rounded-2xl shadow-xl p-8 mb-6">
           <div className="flex items-center justify-between">
             <div>
@@ -373,7 +402,6 @@ export default function BusinessLocationAnalyzer() {
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Input Form */}
           <div className="lg:col-span-1 bg-white rounded-2xl shadow-xl p-6">
             <h2 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
               <Store className="w-5 h-5 text-indigo-600" />
@@ -519,7 +547,6 @@ export default function BusinessLocationAnalyzer() {
               )}
             </div>
 
-            {/* Status Info */}
             <div className="mt-6 p-4 bg-blue-50 rounded-lg">
               <div className="flex items-start gap-2">
                 <AlertCircle className="w-5 h-5 text-blue-600 mt-0.5" />
@@ -534,7 +561,6 @@ export default function BusinessLocationAnalyzer() {
             </div>
           </div>
 
-          {/* Analysis Results */}
           <div className="lg:col-span-2 space-y-6">
             {!analysis ? (
               <div className="bg-white rounded-2xl shadow-xl p-12 text-center">
@@ -548,7 +574,6 @@ export default function BusinessLocationAnalyzer() {
               </div>
             ) : (
               <>
-                {/* Key Metrics */}
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <div className="bg-white rounded-xl shadow-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
@@ -587,7 +612,6 @@ export default function BusinessLocationAnalyzer() {
                   </div>
                 </div>
 
-                {/* Location Info */}
                 <div className="bg-gradient-to-r from-indigo-500 to-purple-600 rounded-2xl shadow-xl p-6 text-white">
                   <h3 className="text-lg font-bold mb-3 flex items-center gap-2">
                     <MapPin className="w-5 h-5" />
@@ -609,7 +633,6 @@ export default function BusinessLocationAnalyzer() {
                   </div>
                 </div>
 
-                {/* Top Competitors */}
                 <div className="bg-white rounded-2xl shadow-xl p-6">
                   <h3 className="text-lg font-bold text-gray-800 mb-4">
                     Top {Math.min(5, analysis.topCompetitors.length)} Nearby Competitors
@@ -647,7 +670,6 @@ export default function BusinessLocationAnalyzer() {
                   )}
                 </div>
 
-                {/* AI Recommendations */}
                 <div className="bg-white rounded-2xl shadow-xl p-6">
                   <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center gap-2">
                     <BarChart3 className="w-5 h-5 text-indigo-600" />
@@ -655,33 +677,3 @@ export default function BusinessLocationAnalyzer() {
                   </h3>
                   <div className="space-y-3">
                     {analysis.recommendations.map((rec, idx) => (
-                      <div key={idx} className="flex items-start gap-3 p-4 bg-gradient-to-r from-indigo-50 to-purple-50 rounded-lg border border-indigo-100">
-                        <div className="text-2xl flex-shrink-0">
-                          {rec.includes('⚠️') ? '⚠️' : rec.includes('✓') ? '✓' : '💡'}
-                        </div>
-                        <p className="text-gray-700 flex-1 leading-relaxed">
-                          {rec.replace(/[⚠️✓💡]/g, '').trim()}
-                        </p>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Refresh Button */}
-                <div className="text-center">
-                  <button
-                    onClick={analyzeLocation}
-                    className="inline-flex items-center gap-2 px-6 py-3 bg-white text-indigo-600 rounded-lg font-semibold hover:bg-indigo-50 transition-colors shadow-lg"
-                  >
-                    <Search className="w-5 h-5" />
-                    Refresh Analysis
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}

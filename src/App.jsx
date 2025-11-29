@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import Map, { Source, Layer, NavigationControl, Marker } from 'react-map-gl/maplibre';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import Map, { Source, Layer, NavigationControl, Marker, Popup } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, 
+  BarChart, Bar, XAxis, YAxis, Tooltip as RechartsTooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, Legend 
 } from 'recharts';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { 
   MapPin, TrendingUp, TrendingDown, Search, AlertCircle, 
-  Loader2, Building2, Key, Map as MapIcon
+  Loader2, Building2, Key, Map as MapIcon, Star
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
@@ -22,48 +22,98 @@ const LoadingState = {
   ERROR: 'ERROR'
 };
 
-// --- API SERVICES ---
+// --- SERVICES ---
 
-// 1. Geocoding Service (Free OpenStreetMap - No Key Required)
+// 1. FREE Real-time Competitor Data (OpenStreetMap/Overpass)
+// This finds ACTUAL places with exact coordinates
+const fetchRealCompetitors = async (lat, lng, type) => {
+  try {
+    // Map common business types to OSM tags
+    const typeMap = {
+      'Restaurant': 'amenity=restaurant',
+      'Cafe': 'amenity=cafe',
+      'Gym': 'leisure=fitness_centre',
+      'Pharmacy': 'amenity=pharmacy',
+      'Bank': 'amenity=bank',
+      'School': 'amenity=school',
+      'Hotel': 'tourism=hotel',
+      'Hospital': 'amenity=hospital'
+    };
+
+    const tag = typeMap[type] || 'amenity=restaurant'; // Default
+    const radius = 1000; // 1km radius
+
+    // Overpass QL Query
+    const query = `
+      [out:json][timeout:25];
+      (
+        node[${tag}](around:${radius},${lat},${lng});
+        way[${tag}](around:${radius},${lat},${lng});
+      );
+      out center 10; 
+    `;
+
+    const response = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(query)}`);
+    const data = await response.json();
+
+    return data.elements.map(place => ({
+      name: place.tags.name || "Unnamed Business",
+      lat: place.lat || place.center.lat,
+      lon: place.lon || place.center.lon,
+      type: type,
+      // Placeholder for AI enrichment
+      rating: 0, 
+      address: "Loading..." 
+    })).filter(p => p.name !== "Unnamed Business").slice(0, 8); // Top 8 results
+
+  } catch (error) {
+    console.error("Overpass API Error:", error);
+    return [];
+  }
+};
+
+// 2. Geocoding (Nominatim)
 const searchLocationName = async (query) => {
   try {
-    // We append "Delhi" to ensure results are relevant
     const response = await fetch(
       `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5`
     );
     const data = await response.json();
     return data.map(item => ({
-      name: item.display_name.split(',')[0], // Short name
+      name: item.display_name.split(',')[0],
       fullName: item.display_name,
       lat: parseFloat(item.lat),
       lon: parseFloat(item.lon)
     }));
   } catch (error) {
-    console.error("Geocoding failed", error);
     return [];
   }
 };
 
-// 2. Gemini Analysis Service
-const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locationName) => {
+// 3. Gemini Analysis (Enriches the REAL data)
+const analyzeWithGemini = async (apiKey, businessType, lat, lng, locationName, realCompetitors) => {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+  const competitorNames = realCompetitors.map(c => c.name).join(", ");
 
   const prompt = `
-    I want to open a "${businessType}" at coordinates ${lat}, ${lng} (Near ${locationName}) in Delhi, India.
+    I am opening a "${businessType}" at ${lat}, ${lng} (Near ${locationName}) in Delhi.
     
-    Act as a Business Strategy AI. 
-    1. Identify 5-8 REAL existing competitors near this specific location using your internal knowledge.
-    2. Estimate their ratings (0-5) and daily footfall based on the area's popularity.
-    3. Provide a SWOT analysis for opening a ${businessType} here.
+    I have verified these REAL competitors exist nearby: [${competitorNames}].
 
-    Return ONLY valid JSON with this structure:
+    Act as a Data Analyst.
+    1. For each verified competitor, estimate their Rating (0-5) and one-line Address based on your knowledge.
+    2. Provide a SWOT analysis for my new business in this specific context.
+    3. Estimate market stats.
+
+    Return JSON ONLY:
     {
       "locationName": "${locationName}",
       "businessType": "${businessType}",
       "stats": {
-        "totalCompetitors": 8,
-        "averageRating": 4.2,
+        "totalCompetitors": ${realCompetitors.length},
+        "averageRating": 4.1,
         "priceLevelDistribution": [
            { "name": "Budget", "value": 30 },
            { "name": "Moderate", "value": 50 },
@@ -71,11 +121,12 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
         ],
         "sentimentScore": 75
       },
-      "strengths": ["Strength 1", "Strength 2", "Strength 3"],
-      "weaknesses": ["Weakness 1", "Weakness 2", "Weakness 3"],
-      "summary": "Executive summary string.",
-      "topCompetitors": [
-        { "name": "Name", "rating": 4.5, "address": "Short address" }
+      "strengths": ["Str1", "Str2"],
+      "weaknesses": ["Weak1", "Weak2"],
+      "summary": "Summary text.",
+      "enrichedCompetitors": [
+        { "name": "${realCompetitors[0]?.name || 'Example'}", "rating": 4.2, "address": "Block B, Connaught Place" }
+        // ... return data for all passed competitors
       ]
     }
   `;
@@ -88,54 +139,13 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locatio
 
 // --- COMPONENTS ---
 
-const CompetitorCharts = ({ stats }) => {
-  const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
-  
-  return (
-    <div className="grid grid-cols-1 gap-6 mt-4">
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-          <p className="text-slate-400 text-[10px] uppercase tracking-wider">Competitors</p>
-          <p className="text-2xl font-bold text-white">{stats.totalCompetitors}</p>
-        </div>
-        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-            <p className="text-slate-400 text-[10px] uppercase tracking-wider">Avg Rating</p>
-            <p className="text-2xl font-bold text-yellow-400">{stats.averageRating}</p>
-        </div>
-        <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
-          <p className="text-slate-400 text-[10px] uppercase tracking-wider">Sentiment</p>
-          <p className="text-2xl font-bold text-blue-400">{stats.sentimentScore}%</p>
-        </div>
-      </div>
-
-      <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 h-64">
-        <h3 className="text-xs font-semibold text-slate-300 mb-2">Market Segments</h3>
-        <ResponsiveContainer width="100%" height="100%">
-          <PieChart>
-            <Pie
-              data={stats.priceLevelDistribution}
-              cx="50%" cy="50%"
-              innerRadius={40} outerRadius={70}
-              paddingAngle={5}
-              dataKey="value"
-            >
-              {stats.priceLevelDistribution.map((entry, index) => (
-                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
-            </Pie>
-            <Tooltip contentStyle={{ backgroundColor: '#1e293b', border: 'none', color: '#fff' }} />
-            <Legend verticalAlign="bottom" height={36} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-};
-
 const Sidebar = ({ 
   businessType, setBusinessType, onAnalyze, loadingState, result, error, apiKey, setApiKey,
   locationQuery, setLocationQuery, onLocationSearch, locationSuggestions, onSelectLocation
 }) => {
+  
+  const COLORS = ['#10b981', '#f59e0b', '#ef4444'];
+
   return (
     <div className="h-full flex flex-col bg-slate-900/95 backdrop-blur-md border-r border-slate-700 w-full md:w-[450px] shadow-2xl overflow-hidden z-20 relative">
       <div className="p-6 border-b border-slate-700 bg-slate-900">
@@ -147,139 +157,119 @@ const Sidebar = ({
 
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
-        {/* API Key */}
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-slate-400 uppercase">1. Gemini API Key</label>
+        {/* INPUTS */}
+        <div className="space-y-4">
           <div className="relative">
             <Key className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-            <input
-              type="password"
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Paste Google Gemini Key"
-              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Gemini API Key" className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
           </div>
-        </div>
 
-        {/* Location Search Input (From old code) */}
-        <div className="space-y-2 relative">
-          <label className="text-xs font-medium text-slate-400 uppercase">2. Target Location</label>
           <div className="relative">
             <MapIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
-            <input
-              type="text"
-              value={locationQuery}
-              onChange={(e) => {
-                setLocationQuery(e.target.value);
-                if(e.target.value.length > 2) onLocationSearch(e.target.value);
-              }}
-              placeholder="Search Area (e.g. Connaught Place)"
-              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <input type="text" value={locationQuery} onChange={(e) => { setLocationQuery(e.target.value); if(e.target.value.length > 2) onLocationSearch(e.target.value); }} placeholder="Search Location (e.g. Hauz Khas)" className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none" />
+            {locationSuggestions.length > 0 && (
+              <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                {locationSuggestions.map((s, idx) => (
+                  <div key={idx} onClick={() => onSelectLocation(s)} className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700">
+                    <p className="text-sm text-white">{s.name}</p>
+                    <p className="text-xs text-slate-400 truncate">{s.fullName}</p>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-          {/* Suggestions Dropdown */}
-          {locationSuggestions.length > 0 && (
-            <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
-              {locationSuggestions.map((suggestion, idx) => (
-                <div 
-                  key={idx} 
-                  onClick={() => onSelectLocation(suggestion)}
-                  className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700 last:border-0"
-                >
-                  <p className="text-sm text-white font-medium">{suggestion.name}</p>
-                  <p className="text-xs text-slate-400 truncate">{suggestion.fullName}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
 
-        {/* Business Type Input */}
-        <div className="space-y-2">
-          <label className="text-xs font-medium text-slate-400 uppercase">3. Business Type</label>
           <div className="flex gap-2">
-            <input
-              type="text"
-              value={businessType}
+            <select 
+              value={businessType} 
               onChange={(e) => setBusinessType(e.target.value)}
-              placeholder="e.g. Coffee Shop, Gym"
-              className="flex-1 bg-slate-800 border border-slate-700 text-white px-4 py-2 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
-              onKeyDown={(e) => e.key === 'Enter' && onAnalyze()}
-            />
-            <button
-              onClick={onAnalyze}
-              disabled={loadingState === LoadingState.LOADING || !apiKey}
-              className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg transition-colors flex items-center justify-center"
+              className="flex-1 bg-slate-800 border border-slate-700 text-white px-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none appearance-none"
             >
-              {loadingState === LoadingState.LOADING ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <Search className="w-5 h-5" />
-              )}
+              <option value="">Select Business Type</option>
+              {['Restaurant', 'Cafe', 'Gym', 'Pharmacy', 'Bank', 'School', 'Hotel'].map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+            <button onClick={onAnalyze} disabled={loadingState === LoadingState.LOADING || !apiKey} className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg">
+              {loadingState === LoadingState.LOADING ? <Loader2 className="w-5 h-5 animate-spin" /> : <Search className="w-5 h-5" />}
             </button>
           </div>
         </div>
 
+        {/* ERROR */}
         {loadingState === LoadingState.ERROR && (
           <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-            <p className="text-sm">{error || "Analysis failed."}</p>
+            <p className="text-sm">{error}</p>
           </div>
         )}
 
+        {/* RESULTS */}
         {result && loadingState === LoadingState.SUCCESS && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="border-b border-slate-700 pb-4">
-              <h2 className="text-xl font-semibold text-white">{result.locationName}</h2>
-              <p className="text-blue-400 text-xs font-medium uppercase tracking-wide mt-1">
-                Analysis for: {result.businessType}
-              </p>
-              <p className="text-slate-300 text-sm mt-3 leading-relaxed italic border-l-2 border-blue-500 pl-3">
-                "{result.summary}"
-              </p>
+            
+            {/* Header Stats */}
+            <div className="grid grid-cols-3 gap-3">
+              <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+                <p className="text-slate-400 text-[10px] uppercase">Competitors</p>
+                <p className="text-2xl font-bold text-white">{result.stats.totalCompetitors}</p>
+              </div>
+              <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+                  <p className="text-slate-400 text-[10px] uppercase">Avg Rating</p>
+                  <p className="text-2xl font-bold text-yellow-400">{result.stats.averageRating}</p>
+              </div>
+              <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
+                <p className="text-slate-400 text-[10px] uppercase">Sentiment</p>
+                <p className="text-2xl font-bold text-blue-400">{result.stats.sentimentScore}%</p>
+              </div>
             </div>
 
-            <CompetitorCharts stats={result.stats} />
-
+            {/* SWOT */}
             <div className="grid grid-cols-2 gap-3">
                <div className="bg-emerald-900/10 border border-emerald-800/30 p-3 rounded-lg">
-                 <h3 className="text-emerald-400 text-sm font-semibold mb-2 flex items-center gap-2">
-                   <TrendingUp className="w-3 h-3" /> Strengths
-                 </h3>
+                 <h3 className="text-emerald-400 text-xs font-bold mb-2 flex items-center gap-1"><TrendingUp className="w-3 h-3" /> STRENGTHS</h3>
                  <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-1">
-                   {result.strengths.map((s, i) => <li key={i}>{s}</li>)}
+                   {result.strengths.slice(0,3).map((s, i) => <li key={i}>{s}</li>)}
                  </ul>
                </div>
                <div className="bg-red-900/10 border border-red-800/30 p-3 rounded-lg">
-                 <h3 className="text-red-400 text-sm font-semibold mb-2 flex items-center gap-2">
-                   <TrendingDown className="w-3 h-3" /> Risks
-                 </h3>
+                 <h3 className="text-red-400 text-xs font-bold mb-2 flex items-center gap-1"><TrendingDown className="w-3 h-3" /> WEAKNESSES</h3>
                  <ul className="list-disc list-inside text-[11px] text-slate-300 space-y-1">
-                   {result.weaknesses.map((w, i) => <li key={i}>{w}</li>)}
+                   {result.weaknesses.slice(0,3).map((w, i) => <li key={i}>{w}</li>)}
                  </ul>
                </div>
             </div>
 
+            {/* Competitor List */}
             <div>
               <h3 className="text-slate-200 font-semibold mb-3 flex items-center gap-2 text-sm">
-                <Building2 className="w-4 h-4 text-slate-400" /> Top Competitors
+                <Building2 className="w-4 h-4 text-slate-400" /> Top Competitors (Real Data)
               </h3>
               <div className="space-y-2">
                 {result.topCompetitors.map((comp, idx) => (
-                  <div key={idx} className="bg-slate-800 p-3 rounded-md border border-slate-700 flex justify-between items-start">
+                  <div key={idx} className="bg-slate-800 p-3 rounded-md border border-slate-700 flex justify-between items-start group hover:border-blue-500 transition-colors cursor-default">
                     <div>
                       <p className="font-medium text-slate-200 text-sm">{comp.name}</p>
                       <p className="text-[10px] text-slate-500 truncate max-w-[150px]">{comp.address}</p>
                     </div>
                     <div className="flex items-center bg-slate-900 px-2 py-1 rounded">
-                      <span className="text-yellow-400 text-xs font-bold">★</span>
-                      <span className="text-xs text-white ml-1">{comp.rating}</span>
+                      <Star className="w-3 h-3 text-yellow-400 fill-yellow-400 mr-1" />
+                      <span className="text-xs text-white">{comp.rating}</span>
                     </div>
                   </div>
                 ))}
               </div>
             </div>
+
+            <div className="h-48">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={result.stats.priceLevelDistribution} cx="50%" cy="50%" innerRadius={30} outerRadius={60} paddingAngle={5} dataKey="value">
+                    {result.stats.priceLevelDistribution.map((entry, index) => <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />)}
+                  </Pie>
+                  <Legend verticalAlign="bottom" height={36} iconSize={8} wrapperStyle={{fontSize: '10px'}} />
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
           </div>
         )}
       </div>
@@ -287,27 +277,25 @@ const Sidebar = ({
   );
 };
 
-// --- MAIN APP COMPONENT ---
+// --- MAIN APP ---
 
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [businessType, setBusinessType] = useState('');
   
-  // Map & Location State
   const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
-  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 12 });
+  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 13 });
   const [geoData, setGeoData] = useState({ city: null, area: null });
   
-  // Search State
   const [locationQuery, setLocationQuery] = useState('');
   const [locationSuggestions, setLocationSuggestions] = useState([]);
   
-  // Analysis State
   const [loadingState, setLoadingState] = useState(LoadingState.IDLE);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [competitorPins, setCompetitorPins] = useState([]); // Store real pins
   const [error, setError] = useState(null);
+  const [hoveredPin, setHoveredPin] = useState(null);
 
-  // Load Map Polygons
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -321,47 +309,69 @@ export default function App() {
     fetchData();
   }, []);
 
-  // Handle Location Search (Geocoding)
   const handleLocationSearch = useCallback(async (query) => {
     const results = await searchLocationName(query);
     setLocationSuggestions(results);
   }, []);
 
-  // Handle Selecting a Location from Dropdown
   const handleSelectLocation = (suggestion) => {
     const newCoords = { latitude: suggestion.lat, longitude: suggestion.lon };
     setSelectedLocation(newCoords);
-    setViewState({ ...newCoords, zoom: 14 }); // Fly to location
+    setViewState({ ...newCoords, zoom: 15 });
     setLocationQuery(suggestion.name);
-    setLocationSuggestions([]); // Close dropdown
+    setLocationSuggestions([]);
   };
 
-  // Handle Analysis
   const handleAnalysis = useCallback(async () => {
-    if (!apiKey) return setError("API Key is required");
+    if (!apiKey || !businessType) return setError("API Key and Business Type required");
     setLoadingState(LoadingState.LOADING);
     setError(null);
+    setCompetitorPins([]); // Clear old pins
+
     try {
-      const data = await analyzeLocationWithGemini(
+      // 1. Fetch REAL pins from OpenStreetMap
+      const realCompetitors = await fetchRealCompetitors(selectedLocation.latitude, selectedLocation.longitude, businessType);
+      
+      if (realCompetitors.length === 0) {
+        throw new Error("No existing competitors found in this area on OSM.");
+      }
+
+      // 2. Enrich with Gemini
+      const data = await analyzeWithGemini(
         apiKey, 
         businessType, 
         selectedLocation.latitude, 
         selectedLocation.longitude,
-        locationQuery || "Selected Location"
+        locationQuery || "Selected Location",
+        realCompetitors
       );
-      setAnalysisResult(data);
+
+      // 3. Merge Real Locations with AI Ratings
+      const mergedCompetitors = realCompetitors.map(real => {
+        const enriched = data.enrichedCompetitors.find(e => e.name === real.name) || {};
+        return { ...real, ...enriched };
+      });
+
+      setCompetitorPins(mergedCompetitors);
+      
+      // Update result with merged data
+      setAnalysisResult({
+        ...data,
+        topCompetitors: mergedCompetitors
+      });
+
       setLoadingState(LoadingState.SUCCESS);
     } catch (e) {
       console.error(e);
       setLoadingState(LoadingState.ERROR);
-      setError("AI Analysis failed. Please check your API key.");
+      setError(e.message || "Analysis failed.");
     }
   }, [apiKey, businessType, selectedLocation, locationQuery]);
 
   const onMapClick = (evt) => {
     const { lng, lat } = evt.lngLat;
     setSelectedLocation({ latitude: lat, longitude: lng });
-    setLocationQuery("Custom Map Pin"); // Reset text input when clicking map
+    setLocationQuery("Custom Map Pin");
   };
 
   return (
@@ -369,19 +379,12 @@ export default function App() {
       <div className="absolute inset-y-0 left-0 md:relative w-full md:w-auto z-20 pointer-events-none">
           <div className="h-full pointer-events-auto">
             <Sidebar
-                businessType={businessType}
-                setBusinessType={setBusinessType}
-                onAnalyze={handleAnalysis}
-                loadingState={loadingState}
-                result={analysisResult}
-                error={error}
-                apiKey={apiKey}
-                setApiKey={setApiKey}
-                // New Search Props
-                locationQuery={locationQuery}
-                setLocationQuery={setLocationQuery}
-                onLocationSearch={handleLocationSearch}
-                locationSuggestions={locationSuggestions}
+                businessType={businessType} setBusinessType={setBusinessType}
+                onAnalyze={handleAnalysis} loadingState={loadingState}
+                result={analysisResult} error={error}
+                apiKey={apiKey} setApiKey={setApiKey}
+                locationQuery={locationQuery} setLocationQuery={setLocationQuery}
+                onLocationSearch={handleLocationSearch} locationSuggestions={locationSuggestions}
                 onSelectLocation={handleSelectLocation}
             />
           </div>
@@ -398,27 +401,56 @@ export default function App() {
         >
           <NavigationControl position="top-right" />
           
-          <Marker 
-            latitude={selectedLocation.latitude} 
-            longitude={selectedLocation.longitude} 
-            anchor="bottom"
-          >
+          {/* User Location Pin */}
+          <Marker latitude={selectedLocation.latitude} longitude={selectedLocation.longitude} anchor="bottom">
              <div className="relative">
-                <div className="w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-lg animate-bounce" />
+                <div className="w-4 h-4 bg-blue-500 rounded-full border-2 border-white shadow-[0_0_15px_rgba(59,130,246,0.5)] animate-bounce" />
                 <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-8 h-2 bg-black/50 blur-sm rounded-full" />
              </div>
           </Marker>
 
-          {geoData.city && (
-             <Source id="delhi-city" type="geojson" data={geoData.city}>
-               <Layer id="city-fill" type="fill" paint={{ 'fill-color': '#3b82f6', 'fill-opacity': 0.05 }} />
-             </Source>
+          {/* Competitor Pins (Red) */}
+          {competitorPins.map((comp, idx) => (
+            <Marker 
+              key={idx} 
+              latitude={comp.lat} 
+              longitude={comp.lon} 
+              anchor="bottom"
+              onClick={e => {
+                e.originalEvent.stopPropagation();
+                setHoveredPin(comp);
+              }}
+            >
+              <div className="group relative cursor-pointer">
+                <MapPin className="w-6 h-6 text-red-500 fill-red-900 drop-shadow-md transition-transform hover:scale-110" />
+              </div>
+            </Marker>
+          ))}
+
+          {/* Popup for Competitors */}
+          {hoveredPin && (
+            <Popup
+              latitude={hoveredPin.lat}
+              longitude={hoveredPin.lon}
+              onClose={() => setHoveredPin(null)}
+              closeButton={true}
+              closeOnClick={false}
+              offset={15}
+              className="text-black"
+            >
+              <div className="p-2 min-w-[150px]">
+                <h3 className="font-bold text-sm">{hoveredPin.name}</h3>
+                <div className="flex items-center gap-1 mt-1">
+                  <Star className="w-3 h-3 text-yellow-500 fill-yellow-500" />
+                  <span className="text-xs font-medium">{hoveredPin.rating || "N/A"}</span>
+                </div>
+                <p className="text-xs text-gray-500 mt-1">{hoveredPin.address}</p>
+              </div>
+            </Popup>
           )}
-          {geoData.area && (
-             <Source id="delhi-area" type="geojson" data={geoData.area}>
-               <Layer id="area-line" type="line" paint={{ 'line-color': '#34d399', 'line-width': 1, 'line-opacity': 0.3 }} />
-             </Source>
-          )}
+
+          {geoData.city && <Source id="delhi-city" type="geojson" data={geoData.city}><Layer id="city-fill" type="fill" paint={{ 'fill-color': '#3b82f6', 'fill-opacity': 0.05 }} /></Source>}
+          {geoData.area && <Source id="delhi-area" type="geojson" data={geoData.area}><Layer id="area-line" type="line" paint={{ 'line-color': '#34d399', 'line-width': 1, 'line-opacity': 0.3 }} /></Source>}
         </Map>
       </div>
     </div>

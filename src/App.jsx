@@ -158,7 +158,7 @@ export default function BusinessLocationAnalyzer() {
   const searchNearbyBusinesses = async (lat, lon, businessType) => {
     try {
       const response = await fetch(
-        `https://api.latlong.in/v2/la_ark.json?lat=${lat}&lon=${lon}&query=${encodeURIComponent(businessType)}`,
+        `https://apihub.latlong.ai/v5/autosuggest.json?query={encodeURIComponent(businessType)}`,
         {
           method: 'GET',
           headers: {

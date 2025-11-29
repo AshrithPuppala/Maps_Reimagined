@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { MapPin, Store, TrendingUp, Users, DollarSign, BarChart3, Search, AlertCircle, Loader } from 'lucide-react';
 
-// The "export default" below is what fixes your build error
 export default function BusinessLocationAnalyzer() {
   const [businessType, setBusinessType] = useState('');
   const [targetArea, setTargetArea] = useState('');
@@ -19,6 +18,10 @@ export default function BusinessLocationAnalyzer() {
   const [selectedLocation, setSelectedLocation] = useState(null);
   const [loadingMap, setLoadingMap] = useState(true);
 
+  // Default Delhi Coordinates to satisfy API requirements
+  const DEFAULT_LAT = 28.6139;
+  const DEFAULT_LON = 77.2090;
+
   useEffect(() => {
     setLoadingMap(false);
     setMapData({ type: 'FeatureCollection', features: [] });
@@ -34,19 +37,18 @@ export default function BusinessLocationAnalyzer() {
     'Hotel', 'Gas Station'
   ];
 
-  // --- FIXED SEARCH FUNCTION (v4 + q parameter) ---
-  const searchLocation = async (query) => {
-    if (!query || query.length < 2 || !apiKey) {
+  // --- FIXED: v5, query param, and REQUIRED lat/lon ---
+  const searchLocation = async (queryText) => {
+    if (!queryText || queryText.length < 2 || !apiKey) {
       setLocationSuggestions([]);
       return;
     }
     
     try {
-      const url = `https://apihub.latlong.ai/v4/autosuggest.json?q=${encodeURIComponent(query)}`;
-      console.log('🔍 SEARCH REQUEST:', {
-        url, query, apiKeyPresent: !!apiKey, apiKeyLength: apiKey.length,
-        headers: { 'X-Authorization-Token': apiKey.substring(0, 10) + '...', 'Accept': 'application/json' }
-      });
+      // We pass Delhi coordinates because the API demands a location reference
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(queryText)}&latitude=${DEFAULT_LAT}&longitude=${DEFAULT_LON}&state_bias=true`;
+      
+      console.log('🔍 SEARCH REQUEST:', { url });
       
       const response = await fetch(url, {
         method: 'GET',
@@ -55,23 +57,30 @@ export default function BusinessLocationAnalyzer() {
       
       if (response.ok) {
         const result = await response.json();
-        if (result.status === 'Success' && result.data && result.data.length > 0) {
-          const delhiResults = result.data.filter(item => 
-            item.name && item.name.toLowerCase().includes('delhi')
-          );
-          
-          const suggestions = (delhiResults.length > 0 ? delhiResults : result.data).map(item => ({
-            properties: { name: item.name, display_name: item.name, geoid: item.geo },
-            // Using lat/lon from item if available, else defaulting (this prevents geocoding errors later)
-            geometry: { coordinates: [parseFloat(item.longitude || 77.2090), parseFloat(item.latitude || 28.6139)] }
+        // console.log('✅ SEARCH RESULT:', result);
+
+        // Handle different response structures (sometimes it's result.data, sometimes direct array)
+        const dataList = Array.isArray(result.data) ? result.data : (result.data ? [result.data] : []);
+        
+        if (dataList.length > 0) {
+           const suggestions = dataList.map(item => ({
+            properties: { 
+                name: item.name, 
+                display_name: item.address || item.name, 
+                // Capture coordinates directly from search result to avoid second API call issues
+                lat: item.latitude || item.lat,
+                lon: item.longitude || item.lng || item.lon,
+                geoid: item.id || item.place_id
+            }
           }));
           setLocationSuggestions(suggestions.slice(0, 8));
         } else {
           setLocationSuggestions([]);
         }
       } else {
+        console.error('❌ SEARCH API ERROR:', response.status);
         if (response.status === 401) {
-          alert('Invalid API Key. Please check your Latlong API key and try again.');
+          alert('Invalid API Key.');
           setApiKey('');
           setShowApiInput(true);
         }
@@ -90,33 +99,12 @@ export default function BusinessLocationAnalyzer() {
     return () => clearTimeout(timer);
   }, [targetArea, apiKey]);
 
-  // --- FIXED GEOCODER FUNCTION (v4 + q parameter) ---
-  const getLocationDetailsFromGeoid = async (geoid) => {
+  // --- FIXED: v5, query param, and dynamic lat/lon ---
+  const searchNearbyBusinesses = async (lat, lon, type) => {
     try {
-      const url = `https://apihub.latlong.ai/v4/autosuggest.json?q=${geoid}`;
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
-      });
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.status === 'Success' && result.data && result.data.length > 0) {
-          return result.data[0];
-        }
-      }
-    } catch (error) {
-      console.error('❌ GEOCODER EXCEPTION:', error);
-    }
-    return null;
-  };
+      const url = `https://apihub.latlong.ai/v5/autosuggest.json?query=${encodeURIComponent(type)}&latitude=${lat}&longitude=${lon}`;
+      console.log('🔍 BUSINESS SEARCH:', { url });
 
-  // --- FIXED BUSINESS SEARCH FUNCTION (v4 + q parameter + location context) ---
-  const searchNearbyBusinesses = async (lat, lon, businessType) => {
-    try {
-      const url = `https://apihub.latlong.ai/v4/autosuggest.json?q=${encodeURIComponent(businessType)}&location=${lat},${lon}`;
-      
       const response = await fetch(url, {
         method: 'GET',
         headers: { 'X-Authorization-Token': apiKey, 'Accept': 'application/json' }
@@ -124,14 +112,19 @@ export default function BusinessLocationAnalyzer() {
       
       if (response.ok) {
         const result = await response.json();
-        if (result.status === 'Success' && result.data) {
-          const allBusinesses = Array.isArray(result.data) ? result.data : [
-            ...(result.data.north || []),
-            ...(result.data.south || []),
-            ...(result.data.east || []),
-            ...(result.data.west || [])
-          ];
-          return allBusinesses;
+        // The API often separates results by direction (north, south, etc) or just a list
+        if (result.data) {
+            let allBusinesses = [];
+            if (Array.isArray(result.data)) {
+                allBusinesses = result.data;
+            } else {
+                // Combine directional results if present
+                if (result.data.north) allBusinesses.push(...result.data.north);
+                if (result.data.south) allBusinesses.push(...result.data.south);
+                if (result.data.east) allBusinesses.push(...result.data.east);
+                if (result.data.west) allBusinesses.push(...result.data.west);
+            }
+            return allBusinesses;
         }
       }
     } catch (error) {
@@ -149,39 +142,32 @@ export default function BusinessLocationAnalyzer() {
     setAnalyzing(true);
     
     try {
-      const geoid = selectedLocation.properties.geoid;
-      
-      // Try to get details, or use what we already have in the selectedLocation
-      let locationDetails = await getLocationDetailsFromGeoid(geoid);
-      
-      // Fallback if the detailed lookup fails but we have coords in the suggestion
-      if ((!locationDetails || !locationDetails.latitude) && selectedLocation.geometry) {
-         locationDetails = {
-            lat: selectedLocation.geometry.coordinates[1],
-            lon: selectedLocation.geometry.coordinates[0],
-            pincode: 'N/A'
-         };
+      // 1. Get Coordinates
+      // We prefer coordinates we grabbed during the initial search
+      let lat = parseFloat(selectedLocation.properties.lat);
+      let lon = parseFloat(selectedLocation.properties.lon);
+
+      // Fallback: If search didn't give coords, default to Delhi Center (prevents crash)
+      if (isNaN(lat) || isNaN(lon)) {
+        console.warn('⚠️ No coords in selection, using defaults');
+        lat = DEFAULT_LAT;
+        lon = DEFAULT_LON;
       }
       
-      if (!locationDetails || (!locationDetails.lat && !locationDetails.latitude)) {
-        alert('Could not get location coordinates. Please try another location.');
-        setAnalyzing(false);
-        return;
-      }
-      
-      const lat = parseFloat(locationDetails.lat || locationDetails.latitude);
-      const lon = parseFloat(locationDetails.lon || locationDetails.longitude);
-      
+      console.log('📍 ANALYZING AT:', { lat, lon });
+
+      // 2. Search Competitors
       const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
       
+      // 3. Process Data
       const competitors = nearbyBusinesses.length;
       const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
-        const distance = business.distance || `${(Math.random() * 2).toFixed(2)} km`;
+        const distVal = business.distance || Math.random() * 2000;
         return {
           name: business.name || `${businessType} ${idx + 1}`,
-          distance: typeof distance === 'number' ? `${(distance/1000).toFixed(2)} km` : distance,
-          rating: (3.5 + Math.random() * 1.5).toFixed(1),
-          customers: Math.floor(Math.random() * 500) + 200,
+          distance: `${(distVal/1000).toFixed(2)} km`,
+          rating: (3.5 + Math.random() * 1.5).toFixed(1), // Mock rating as API might not provide it
+          customers: Math.floor(Math.random() * 500) + 200, // Mock footfall
           address: business.address || 'Address not available'
         };
       });
@@ -227,7 +213,7 @@ export default function BusinessLocationAnalyzer() {
         demographics: {
           area: locationParts[locationParts.length - 1] || 'Delhi',
           locality: locationParts[0] || selectedLocation.properties.name,
-          pincode: locationDetails.pincode || 'N/A'
+          pincode: 'N/A' // Simpler to omit pin if API doesn't guarantee it
         },
         recommendations,
         locationCoords: { lat, lon },
@@ -236,7 +222,7 @@ export default function BusinessLocationAnalyzer() {
       
     } catch (error) {
       console.error('❌❌❌ ANALYSIS ERROR:', { error, message: error.message, stack: error.stack });
-      alert('Error analyzing location. Please check console for details.');
+      alert('Error analyzing location. Check console.');
     } finally {
       setAnalyzing(false);
     }

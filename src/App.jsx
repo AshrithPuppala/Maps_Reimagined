@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Map, { Source, Layer, NavigationControl, Marker } from 'react-map-gl/maplibre';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import { 
@@ -7,12 +7,11 @@ import {
 } from 'recharts';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { 
-  MapPin, Store, TrendingUp, TrendingDown, Users, 
-  Search, AlertCircle, Loader2, Building2, Key 
+  MapPin, TrendingUp, TrendingDown, Search, AlertCircle, 
+  Loader2, Building2, Key, Map as MapIcon
 } from 'lucide-react';
 
 // --- CONFIGURATION ---
-// We use a free, open-source map style so you don't need a Mapbox/Latlong key for the visuals
 const MAP_STYLE_URL = "https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json";
 
 // --- TYPES ---
@@ -23,26 +22,44 @@ const LoadingState = {
   ERROR: 'ERROR'
 };
 
-// --- API SERVICE ---
-const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng) => {
+// --- API SERVICES ---
+
+// 1. Geocoding Service (Free OpenStreetMap - No Key Required)
+const searchLocationName = async (query) => {
+  try {
+    // We append "Delhi" to ensure results are relevant
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5`
+    );
+    const data = await response.json();
+    return data.map(item => ({
+      name: item.display_name.split(',')[0], // Short name
+      fullName: item.display_name,
+      lat: parseFloat(item.lat),
+      lon: parseFloat(item.lon)
+    }));
+  } catch (error) {
+    console.error("Geocoding failed", error);
+    return [];
+  }
+};
+
+// 2. Gemini Analysis Service
+const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locationName) => {
   const genAI = new GoogleGenerativeAI(apiKey);
-  // We use the flash model for speed. 
-  // Note: Google Maps Grounding is an Enterprise/Vertex feature. 
-  // For standard keys, Gemini will use its training data (which is very good for general knowledge).
-  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
 
   const prompt = `
-    I want to open a "${businessType}" at coordinates ${lat}, ${lng} in Delhi, India.
+    I want to open a "${businessType}" at coordinates ${lat}, ${lng} (Near ${locationName}) in Delhi, India.
     
     Act as a Business Strategy AI. 
-    1. Identify the likely area name based on these coordinates.
-    2. Identify 5-8 REAL existing competitors near this location using your knowledge base.
-    3. Estimate their ratings and footfall based on popularity.
-    4. Provide a SWOT analysis.
+    1. Identify 5-8 REAL existing competitors near this specific location using your internal knowledge.
+    2. Estimate their ratings (0-5) and daily footfall based on the area's popularity.
+    3. Provide a SWOT analysis for opening a ${businessType} here.
 
     Return ONLY valid JSON with this structure:
     {
-      "locationName": "Area Name",
+      "locationName": "${locationName}",
       "businessType": "${businessType}",
       "stats": {
         "totalCompetitors": 8,
@@ -58,15 +75,13 @@ const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng) => {
       "weaknesses": ["Weakness 1", "Weakness 2", "Weakness 3"],
       "summary": "Executive summary string.",
       "topCompetitors": [
-        { "name": "Name", "rating": 4.5, "address": "Address string" }
+        { "name": "Name", "rating": 4.5, "address": "Short address" }
       ]
     }
   `;
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  
-  // Clean markdown if present
   const jsonString = text.replace(/```json/g, '').replace(/```/g, '').trim();
   return JSON.parse(jsonString);
 };
@@ -78,7 +93,6 @@ const CompetitorCharts = ({ stats }) => {
   
   return (
     <div className="grid grid-cols-1 gap-6 mt-4">
-      {/* Stats Cards */}
       <div className="grid grid-cols-3 gap-3">
         <div className="bg-slate-800/50 p-3 rounded-lg border border-slate-700 text-center">
           <p className="text-slate-400 text-[10px] uppercase tracking-wider">Competitors</p>
@@ -94,7 +108,6 @@ const CompetitorCharts = ({ stats }) => {
         </div>
       </div>
 
-      {/* Charts Row */}
       <div className="bg-slate-800/50 p-4 rounded-lg border border-slate-700 h-64">
         <h3 className="text-xs font-semibold text-slate-300 mb-2">Market Segments</h3>
         <ResponsiveContainer width="100%" height="100%">
@@ -120,25 +133,21 @@ const CompetitorCharts = ({ stats }) => {
 };
 
 const Sidebar = ({ 
-  businessType, setBusinessType, onAnalyze, loadingState, result, error, apiKey, setApiKey 
+  businessType, setBusinessType, onAnalyze, loadingState, result, error, apiKey, setApiKey,
+  locationQuery, setLocationQuery, onLocationSearch, locationSuggestions, onSelectLocation
 }) => {
   return (
     <div className="h-full flex flex-col bg-slate-900/95 backdrop-blur-md border-r border-slate-700 w-full md:w-[450px] shadow-2xl overflow-hidden z-20 relative">
-      {/* Header */}
       <div className="p-6 border-b border-slate-700 bg-slate-900">
         <h1 className="text-2xl font-bold bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent flex items-center gap-2">
-          
-
-[Image of business growth chart icon]
- Delhi Scout
+          Delhi Scout AI
         </h1>
-        <p className="text-slate-400 text-sm mt-1">AI-Powered Location Intelligence</p>
+        <p className="text-slate-400 text-sm mt-1">Real-time Location Intelligence</p>
       </div>
 
-      {/* Content */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         
-        {/* API Key Input */}
+        {/* API Key */}
         <div className="space-y-2">
           <label className="text-xs font-medium text-slate-400 uppercase">1. Gemini API Key</label>
           <div className="relative">
@@ -153,9 +162,42 @@ const Sidebar = ({
           </div>
         </div>
 
-        {/* Business Input */}
+        {/* Location Search Input (From old code) */}
+        <div className="space-y-2 relative">
+          <label className="text-xs font-medium text-slate-400 uppercase">2. Target Location</label>
+          <div className="relative">
+            <MapIcon className="absolute left-3 top-2.5 w-4 h-4 text-slate-500" />
+            <input
+              type="text"
+              value={locationQuery}
+              onChange={(e) => {
+                setLocationQuery(e.target.value);
+                if(e.target.value.length > 2) onLocationSearch(e.target.value);
+              }}
+              placeholder="Search Area (e.g. Connaught Place)"
+              className="w-full bg-slate-800 border border-slate-700 text-white pl-9 pr-4 py-2 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+          {/* Suggestions Dropdown */}
+          {locationSuggestions.length > 0 && (
+            <div className="absolute z-50 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-xl max-h-60 overflow-y-auto">
+              {locationSuggestions.map((suggestion, idx) => (
+                <div 
+                  key={idx} 
+                  onClick={() => onSelectLocation(suggestion)}
+                  className="px-4 py-3 hover:bg-slate-700 cursor-pointer border-b border-slate-700 last:border-0"
+                >
+                  <p className="text-sm text-white font-medium">{suggestion.name}</p>
+                  <p className="text-xs text-slate-400 truncate">{suggestion.fullName}</p>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Business Type Input */}
         <div className="space-y-2">
-          <label className="text-xs font-medium text-slate-400 uppercase">2. Business Type</label>
+          <label className="text-xs font-medium text-slate-400 uppercase">3. Business Type</label>
           <div className="flex gap-2">
             <input
               type="text"
@@ -177,21 +219,17 @@ const Sidebar = ({
               )}
             </button>
           </div>
-          {!apiKey && <p className="text-xs text-red-400">API Key required to analyze.</p>}
         </div>
 
-        {/* Error State */}
         {loadingState === LoadingState.ERROR && (
           <div className="bg-red-900/20 border border-red-800 text-red-200 p-4 rounded-lg flex items-start gap-3">
             <AlertCircle className="w-5 h-5 mt-0.5 shrink-0" />
-            <p className="text-sm">{error || "Analysis failed. Check your API key and try again."}</p>
+            <p className="text-sm">{error || "Analysis failed."}</p>
           </div>
         )}
 
-        {/* Results */}
         {result && loadingState === LoadingState.SUCCESS && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            
             <div className="border-b border-slate-700 pb-4">
               <h2 className="text-xl font-semibold text-white">{result.locationName}</h2>
               <p className="text-blue-400 text-xs font-medium uppercase tracking-wide mt-1">
@@ -242,7 +280,6 @@ const Sidebar = ({
                 ))}
               </div>
             </div>
-
           </div>
         )}
       </div>
@@ -255,10 +292,17 @@ const Sidebar = ({
 export default function App() {
   const [apiKey, setApiKey] = useState('');
   const [businessType, setBusinessType] = useState('');
+  
+  // Map & Location State
   const [selectedLocation, setSelectedLocation] = useState({ latitude: 28.6139, longitude: 77.2090 });
-  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 11 });
+  const [viewState, setViewState] = useState({ latitude: 28.6139, longitude: 77.2090, zoom: 12 });
   const [geoData, setGeoData] = useState({ city: null, area: null });
   
+  // Search State
+  const [locationQuery, setLocationQuery] = useState('');
+  const [locationSuggestions, setLocationSuggestions] = useState([]);
+  
+  // Analysis State
   const [loadingState, setLoadingState] = useState(LoadingState.IDLE);
   const [analysisResult, setAnalysisResult] = useState(null);
   const [error, setError] = useState(null);
@@ -277,13 +321,33 @@ export default function App() {
     fetchData();
   }, []);
 
+  // Handle Location Search (Geocoding)
+  const handleLocationSearch = useCallback(async (query) => {
+    const results = await searchLocationName(query);
+    setLocationSuggestions(results);
+  }, []);
+
+  // Handle Selecting a Location from Dropdown
+  const handleSelectLocation = (suggestion) => {
+    const newCoords = { latitude: suggestion.lat, longitude: suggestion.lon };
+    setSelectedLocation(newCoords);
+    setViewState({ ...newCoords, zoom: 14 }); // Fly to location
+    setLocationQuery(suggestion.name);
+    setLocationSuggestions([]); // Close dropdown
+  };
+
+  // Handle Analysis
   const handleAnalysis = useCallback(async () => {
     if (!apiKey) return setError("API Key is required");
     setLoadingState(LoadingState.LOADING);
     setError(null);
     try {
       const data = await analyzeLocationWithGemini(
-        apiKey, businessType, selectedLocation.latitude, selectedLocation.longitude
+        apiKey, 
+        businessType, 
+        selectedLocation.latitude, 
+        selectedLocation.longitude,
+        locationQuery || "Selected Location"
       );
       setAnalysisResult(data);
       setLoadingState(LoadingState.SUCCESS);
@@ -292,16 +356,16 @@ export default function App() {
       setLoadingState(LoadingState.ERROR);
       setError("AI Analysis failed. Please check your API key.");
     }
-  }, [apiKey, businessType, selectedLocation]);
+  }, [apiKey, businessType, selectedLocation, locationQuery]);
 
   const onMapClick = (evt) => {
     const { lng, lat } = evt.lngLat;
     setSelectedLocation({ latitude: lat, longitude: lng });
+    setLocationQuery("Custom Map Pin"); // Reset text input when clicking map
   };
 
   return (
     <div className="flex h-screen w-screen overflow-hidden bg-slate-950 text-white font-sans">
-      {/* Sidebar - Responsive */}
       <div className="absolute inset-y-0 left-0 md:relative w-full md:w-auto z-20 pointer-events-none">
           <div className="h-full pointer-events-auto">
             <Sidebar
@@ -313,11 +377,16 @@ export default function App() {
                 error={error}
                 apiKey={apiKey}
                 setApiKey={setApiKey}
+                // New Search Props
+                locationQuery={locationQuery}
+                setLocationQuery={setLocationQuery}
+                onLocationSearch={handleLocationSearch}
+                locationSuggestions={locationSuggestions}
+                onSelectLocation={handleSelectLocation}
             />
           </div>
       </div>
 
-      {/* Map Area */}
       <div className="flex-1 relative z-10">
         <Map
           {...viewState}

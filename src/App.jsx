@@ -62,10 +62,12 @@ export default function BusinessLocationAnalyzer() {
     try {
       // Using V2 API which returns {status, data: [{name, geo}]} format
       const response = await fetch(
-        `https://api.latlong.in/v2/autocomplete.json?query=${encodeURIComponent(query)}`,
+        `https://api.latlong.in/v2/au_ete.json?query=${encodeURIComponent(query)}`,
         {
+          method: 'GET',
           headers: {
-            'X-Authorization-Token': apiKey
+            'X-Authorization-Token': apiKey,
+            'Accept': 'application/json'
           }
         }
       );
@@ -77,7 +79,7 @@ export default function BusinessLocationAnalyzer() {
         if (result.status === 'Success' && result.data && result.data.length > 0) {
           // Filter for Delhi locations
           const delhiResults = result.data.filter(item => 
-            item.name.toLowerCase().includes('delhi')
+            item.name && item.name.toLowerCase().includes('delhi')
           );
           
           const suggestions = (delhiResults.length > 0 ? delhiResults : result.data).map(item => ({
@@ -92,10 +94,17 @@ export default function BusinessLocationAnalyzer() {
           }));
           setLocationSuggestions(suggestions.slice(0, 8));
         } else {
+          console.log('No suggestions found or empty data');
           setLocationSuggestions([]);
         }
       } else {
-        console.error('API error:', response.status, await response.text());
+        const errorText = await response.text();
+        console.error('API error:', response.status, errorText);
+        if (response.status === 401) {
+          alert('Invalid API Key. Please check your Latlong API key and try again.');
+          setApiKey('');
+          setShowApiInput(true);
+        }
         setLocationSuggestions([]);
       }
     } catch (error) {
@@ -120,10 +129,12 @@ export default function BusinessLocationAnalyzer() {
     try {
       // Using geocoder API with geoid to get lat/lon and full details
       const response = await fetch(
-        `https://api.latlong.in/v2/geocoder.json?geo=${geoid}`,
+        `https://api.latlong.in/v2/ge_er.json?geo=${geoid}`,
         {
+          method: 'GET',
           headers: {
-            'X-Authorization-Token': apiKey
+            'X-Authorization-Token': apiKey,
+            'Accept': 'application/json'
           }
         }
       );
@@ -134,6 +145,8 @@ export default function BusinessLocationAnalyzer() {
         if (result.status === 'Success' && result.data && result.data.length > 0) {
           return result.data[0];
         }
+      } else {
+        console.error('Geocoder API error:', response.status, await response.text());
       }
     } catch (error) {
       console.error('Error getting location details:', error);
@@ -145,10 +158,12 @@ export default function BusinessLocationAnalyzer() {
   const searchNearbyBusinesses = async (lat, lon, businessType) => {
     try {
       const response = await fetch(
-        `https://api.latlong.in/v2/landmark.json?lat=${lat}&lon=${lon}&query=${encodeURIComponent(businessType)}`,
+        `https://api.latlong.in/v2/la_ark.json?lat=${lat}&lon=${lon}&query=${encodeURIComponent(businessType)}`,
         {
+          method: 'GET',
           headers: {
-            'X-Authorization-Token': apiKey
+            'X-Authorization-Token': apiKey,
+            'Accept': 'application/json'
           }
         }
       );
@@ -166,6 +181,8 @@ export default function BusinessLocationAnalyzer() {
           ];
           return allBusinesses;
         }
+      } else {
+        console.error('Landmark API error:', response.status, await response.text());
       }
     } catch (error) {
       console.error('Error searching businesses:', error);

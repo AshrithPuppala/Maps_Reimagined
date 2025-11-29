@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Delhi Transport Finder</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
+  <style>
+    html,body { height: 100%; margin: 0; }
+    #map { height: 100vh; width: 100%; }
+
+    .button-box {
+      position: absolute;
+      z-index: 9999;
+      top: 20px;
+      left: 20px;
+      background: white;
+      padding: 8px;
+      border-radius: 6px;
+      box-shadow: 0 0 8px rgba(0,0,0,0.2);
+      font-family: sans-serif;
+    }
+    .button-box button {
+      padding: 6px 10px;
+      border: none;
+      background: #4681f4;
+      color: white;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    .button-box button:hover { background: #0051d4; }
+
+    /* Banner (hidden by default) */
+    #map-error-banner {
+      display: none;
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100000;
+      padding: 8px;
+      text-align: center;
+      font-family: sans-serif;
+      font-size: 14px;
+      color: white;
+    }
+  </style>
+</head>
+
+<body>
+
+  <!-- Floating controls -->
+  <div class="button-box">
+    <button onclick="findLocation()">Find Nearest Metro/Bus</button>
+  </div>
+
+  <!-- Error banner -->
+  <div id="map-error-banner"></div>
+
+  <!-- Map -->
+  <div id="map"></div>
+
+  <!-- Leaflet + Turf -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@turf/turf@6/turf.min.js"></script>
+
+  <!-- Main script (final) -->
+  <script src="script.js"></script>
+</body>
+</html>

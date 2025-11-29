@@ -12,7 +12,7 @@ CORS(app, resources={
     r"/*": {
         "origins": [
             "http://localhost:3000",
-            "https://maps-reimagined-frontend.onrender.com",
+            "https://maps-reimagined-vljw.onrender.com",
             "https://*.onrender.com"
         ],
         "methods": ["GET", "POST", "OPTIONS"],

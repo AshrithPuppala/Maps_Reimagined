@@ -1,6 +1,10 @@
-import React, { useState } from 'react';
-import { MapPin, TrendingUp, AlertTriangle, Calendar, Building2, Search } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Area, AreaChart } from 'recharts';
+import React, { useState, useEffect } from 'react';
+import { MapPin, TrendingUp, AlertTriangle, Calendar, Building2, Search, Loader2, Wifi, WifiOff } from 'lucide-react';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// PRODUCTION: Use environment variable for API URL
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+const IS_PRODUCTION = process.env.REACT_APP_ENV === 'production';
 
 // Mock future events dataset for Delhi
 const FUTURE_EVENTS = {
@@ -49,89 +53,168 @@ const PredictiveBusinessAnalyzer = () => {
   const [location, setLocation] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [coldStart, setColdStart] = useState(false);
+  const [backendStatus, setBackendStatus] = useState('unknown');
 
-  const analyzeLocation = () => {
-    setLoading(true);
-    
-    setTimeout(() => {
-      const locationLower = location.toLowerCase();
-      const events = FUTURE_EVENTS[locationLower] || [];
-      const trend = AREA_TRENDS[locationLower] || { trend: "unknown", temp: 50, cafes_6mo: 0, rent_change: 0 };
-      const seasonality = BUSINESS_SEASONALITY[businessType.toLowerCase()] || { summer_drop: 0.2, festival_boost: 0.3, weekend_boost: 0.2 };
+  // Check backend connectivity on mount
+  useEffect(() => {
+    checkBackendHealth();
+  }, []);
 
-      // Calculate risk score
-      let riskScore = 50;
-      const positiveEvents = events.filter(e => e.impact === "positive");
-      const negativeEvents = events.filter(e => e.impact === "negative");
-      
-      negativeEvents.forEach(e => riskScore += e.severity * 20);
-      positiveEvents.forEach(e => riskScore -= e.severity * 15);
-      
-      if (trend.trend === "declining") riskScore += 15;
-      if (trend.trend === "heating") riskScore -= 10;
-      
-      riskScore = Math.max(0, Math.min(100, riskScore));
-
-      // Generate 10-year risk projection
-      const riskProjection = [];
-      for (let year = 0; year <= 10; year++) {
-        let yearRisk = riskScore;
-        
-        // Apply event impacts
-        events.forEach(event => {
-          const eventYear = new Date(event.date).getFullYear() - 2025 + year;
-          if (eventYear >= 0 && eventYear <= year) {
-            if (event.impact === "negative") {
-              yearRisk += event.severity * 15 * Math.exp(-0.3 * (year - eventYear));
-            } else {
-              yearRisk -= event.severity * 12 * Math.exp(-0.2 * (year - eventYear));
-            }
-          }
-        });
-        
-        // Apply trend
-        if (trend.trend === "heating") yearRisk -= year * 2;
-        if (trend.trend === "declining") yearRisk += year * 1.5;
-        
-        yearRisk = Math.max(0, Math.min(100, yearRisk));
-        
-        riskProjection.push({
-          year: 2025 + year,
-          risk: Math.round(yearRisk),
-          label: year === 0 ? "Now" : `+${year}y`
-        });
-      }
-
-      // Determine recommendations
-      const alternatives = [];
-      if (riskScore > 60) {
-        const allLocations = Object.keys(FUTURE_EVENTS);
-        allLocations.forEach(loc => {
-          if (loc !== locationLower) {
-            const locTrend = AREA_TRENDS[loc];
-            if (locTrend && locTrend.trend !== "declining") {
-              alternatives.push({
-                type: "location",
-                name: loc.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
-                reason: `Lower construction risk, ${locTrend.trend} neighborhood`
-              });
-            }
-          }
-        });
-      }
-
-      setAnalysis({
-        riskScore,
-        events,
-        trend,
-        seasonality,
-        riskProjection,
-        alternatives: alternatives.slice(0, 2),
-        insights: generateInsights(events, trend, seasonality, businessType)
+  const checkBackendHealth = async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/health`, {
+        method: 'GET',
+        signal: AbortSignal.timeout(5000) // 5 second timeout
       });
       
+      if (response.ok) {
+        setBackendStatus('connected');
+      } else {
+        setBackendStatus('error');
+      }
+    } catch (err) {
+      console.error('Backend health check failed:', err);
+      setBackendStatus('disconnected');
+    }
+  };
+
+  const analyzeLocation = async () => {
+    setLoading(true);
+    setError(null);
+    setColdStart(false);
+
+    // Show cold start warning after 10 seconds (Render free tier)
+    const coldStartTimer = setTimeout(() => {
+      if (loading) {
+        setColdStart(true);
+      }
+    }, 10000);
+
+    try {
+      // Production: Try to fetch from backend API
+      if (IS_PRODUCTION && backendStatus === 'connected') {
+        try {
+          const response = await fetch(`${API_BASE_URL}/api/analyze`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              business_type: businessType,
+              location: location
+            }),
+            signal: AbortSignal.timeout(60000) // 60 second timeout for cold start
+          });
+
+          if (!response.ok) {
+            throw new Error(`API Error: ${response.status}`);
+          }
+
+          const data = await response.json();
+          
+          // Use backend data if available
+          setAnalysis(data);
+          clearTimeout(coldStartTimer);
+          setLoading(false);
+          return;
+        } catch (apiError) {
+          console.error('API call failed, falling back to local analysis:', apiError);
+          // Fall through to local analysis
+        }
+      }
+
+      // Fallback: Local analysis (for offline or API failure)
+      setTimeout(() => {
+        const localAnalysis = performLocalAnalysis();
+        setAnalysis(localAnalysis);
+        clearTimeout(coldStartTimer);
+        setLoading(false);
+      }, 1500);
+
+    } catch (err) {
+      console.error('Analysis error:', err);
+      setError('Failed to analyze location. Please try again.');
+      clearTimeout(coldStartTimer);
       setLoading(false);
-    }, 1500);
+    }
+  };
+
+  const performLocalAnalysis = () => {
+    const locationLower = location.toLowerCase();
+    const events = FUTURE_EVENTS[locationLower] || [];
+    const trend = AREA_TRENDS[locationLower] || { trend: "unknown", temp: 50, cafes_6mo: 0, rent_change: 0 };
+    const seasonality = BUSINESS_SEASONALITY[businessType.toLowerCase()] || { summer_drop: 0.2, festival_boost: 0.3, weekend_boost: 0.2 };
+
+    // Calculate risk score
+    let riskScore = 50;
+    const positiveEvents = events.filter(e => e.impact === "positive");
+    const negativeEvents = events.filter(e => e.impact === "negative");
+    
+    negativeEvents.forEach(e => riskScore += e.severity * 20);
+    positiveEvents.forEach(e => riskScore -= e.severity * 15);
+    
+    if (trend.trend === "declining") riskScore += 15;
+    if (trend.trend === "heating") riskScore -= 10;
+    
+    riskScore = Math.max(0, Math.min(100, riskScore));
+
+    // Generate 10-year risk projection
+    const riskProjection = [];
+    for (let year = 0; year <= 10; year++) {
+      let yearRisk = riskScore;
+      
+      events.forEach(event => {
+        const eventYear = new Date(event.date).getFullYear() - 2025 + year;
+        if (eventYear >= 0 && eventYear <= year) {
+          if (event.impact === "negative") {
+            yearRisk += event.severity * 15 * Math.exp(-0.3 * (year - eventYear));
+          } else {
+            yearRisk -= event.severity * 12 * Math.exp(-0.2 * (year - eventYear));
+          }
+        }
+      });
+      
+      if (trend.trend === "heating") yearRisk -= year * 2;
+      if (trend.trend === "declining") yearRisk += year * 1.5;
+      
+      yearRisk = Math.max(0, Math.min(100, yearRisk));
+      
+      riskProjection.push({
+        year: 2025 + year,
+        risk: Math.round(yearRisk),
+        label: year === 0 ? "Now" : `+${year}y`
+      });
+    }
+
+    // Determine recommendations
+    const alternatives = [];
+    if (riskScore > 60) {
+      const allLocations = Object.keys(FUTURE_EVENTS);
+      allLocations.forEach(loc => {
+        if (loc !== locationLower) {
+          const locTrend = AREA_TRENDS[loc];
+          if (locTrend && locTrend.trend !== "declining") {
+            alternatives.push({
+              type: "location",
+              name: loc.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' '),
+              reason: `Lower construction risk, ${locTrend.trend} neighborhood`
+            });
+          }
+        }
+      });
+    }
+
+    return {
+      riskScore,
+      events,
+      trend,
+      seasonality,
+      riskProjection,
+      alternatives: alternatives.slice(0, 2),
+      insights: generateInsights(events, trend, seasonality, businessType)
+    };
   };
 
   const generateInsights = (events, trend, seasonality, business) => {
@@ -200,12 +283,35 @@ const PredictiveBusinessAnalyzer = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 p-8">
       <div className="max-w-6xl mx-auto">
+        {/* Header */}
         <div className="text-center mb-8">
           <h1 className="text-4xl font-bold text-slate-800 mb-2 flex items-center justify-center gap-3">
             <MapPin className="text-blue-600" size={40} />
             Delhi Business Predictor
           </h1>
           <p className="text-slate-600">AI-Powered Location Analysis for Smart Business Decisions</p>
+          
+          {/* Backend Status Indicator */}
+          <div className="mt-4 flex items-center justify-center gap-2">
+            {backendStatus === 'connected' && (
+              <span className="flex items-center gap-1 text-sm text-green-600">
+                <Wifi size={16} />
+                API Connected
+              </span>
+            )}
+            {backendStatus === 'disconnected' && (
+              <span className="flex items-center gap-1 text-sm text-yellow-600">
+                <WifiOff size={16} />
+                Offline Mode (Using Local Data)
+              </span>
+            )}
+            {backendStatus === 'error' && (
+              <span className="flex items-center gap-1 text-sm text-red-600">
+                <WifiOff size={16} />
+                API Error (Using Local Data)
+              </span>
+            )}
+          </div>
         </div>
 
         {/* Input Section */}
@@ -242,13 +348,37 @@ const PredictiveBusinessAnalyzer = () => {
               </select>
             </div>
           </div>
+
+          {/* Error Message */}
+          {error && (
+            <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-lg text-red-700">
+              {error}
+            </div>
+          )}
+
+          {/* Cold Start Warning */}
+          {coldStart && (
+            <div className="mb-4 p-4 bg-yellow-50 border border-yellow-200 rounded-lg text-yellow-800">
+              <div className="flex items-center gap-2">
+                <Loader2 className="animate-spin" size={20} />
+                <span className="font-semibold">Server is starting up...</span>
+              </div>
+              <p className="text-sm mt-1">
+                First request may take 30-50 seconds on free tier. Please wait...
+              </p>
+            </div>
+          )}
+
           <button
             onClick={analyzeLocation}
             disabled={!businessType || !location || loading}
             className="w-full bg-blue-600 text-white py-3 rounded-lg font-semibold hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
           >
             {loading ? (
-              <>Processing Analysis...</>
+              <>
+                <Loader2 className="animate-spin" size={20} />
+                {coldStart ? 'Starting server...' : 'Processing Analysis...'}
+              </>
             ) : (
               <>
                 <Search size={20} />
@@ -256,11 +386,16 @@ const PredictiveBusinessAnalyzer = () => {
               </>
             )}
           </button>
+
+          {/* API Info */}
+          <div className="mt-4 text-xs text-slate-500 text-center">
+            API Endpoint: {API_BASE_URL} | Mode: {IS_PRODUCTION ? 'Production' : 'Development'}
+          </div>
         </div>
 
         {/* Results Section */}
         {analysis && (
-          <div className="space-y-6">
+          <div className="space-y-6 animate-fade-in">
             {/* Risk Score */}
             <div className={`rounded-xl shadow-lg p-6 border-2 ${getRiskColor(analysis.riskScore)}`}>
               <div className="flex items-center justify-between mb-4">
@@ -268,7 +403,7 @@ const PredictiveBusinessAnalyzer = () => {
                   <h2 className="text-2xl font-bold">{getRiskLabel(analysis.riskScore)}</h2>
                   <p className="text-sm opacity-80">Overall Risk Assessment</p>
                 </div>
-                <div className="text-5xl font-bold">{analysis.riskScore}</div>
+                <div className="text-5xl font-bold">{Math.round(analysis.riskScore)}</div>
               </div>
               <div className="w-full bg-white rounded-full h-3">
                 <div

@@ -13,14 +13,20 @@ CORS(app)
 def load_datasets():
     """Load all geospatial datasets"""
     try:
-        # Load future events JSON (this works)
+        # Load future events JSON
         print("\n=== Loading future events ===")
-        with open('data/delhi_future_events.json', 'r') as f:
-            future_events = json.load(f)
-        print(f"✓ Loaded {len(future_events)} future events")
+        try:
+            with open('data/delhi_future_events.json', 'r') as f:
+                future_events = json.load(f)
+            print(f"✓ Loaded {len(future_events)} future events")
+        except FileNotFoundError:
+            print("⚠️ delhi_future_events.json not found, using empty list")
+            future_events = []
+        except json.JSONDecodeError as e:
+            print(f"⚠️ Error parsing delhi_future_events.json: {e}")
+            future_events = []
         
         # Create fallback location data as dictionaries
-        # This avoids GeoJSON/GeoPandas issues entirely
         delhi_areas_fallback = [
             {'name': 'Connaught Place', 'lat': 28.6315, 'lng': 77.2167},
             {'name': 'Karol Bagh', 'lat': 28.6519, 'lng': 77.1900},
@@ -50,6 +56,7 @@ def load_datasets():
         print(f"✓ Using fallback location database")
         print(f"  Areas: {len(delhi_areas_fallback)}")
         print(f"  Pincodes: {len(delhi_pincodes_fallback)}")
+        print(f"  Future events: {len(future_events)}")
         
         print("\n=== All datasets loaded successfully! ===\n")
         
@@ -59,8 +66,9 @@ def load_datasets():
         print(f"❌ Error loading datasets: {e}")
         import traceback
         traceback.print_exc()
+        # Return empty/fallback data instead of crashing
         return [], [], []
-
+        
 # Initialize datasets
 print("=" * 60)
 print("INITIALIZING MAPS REIMAGINED API")

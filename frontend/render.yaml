@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: delhi-predictor-frontend
+    env: static
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: "npm install && npm run build"
+    staticPublishPath: ./build
+    envVars:
+      - key: NODE_VERSION
+        value: 18.17.0
+      - key: REACT_APP_API_URL
+        value: https://delhi-predictor-backend.onrender.com

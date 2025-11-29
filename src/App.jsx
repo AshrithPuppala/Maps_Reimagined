@@ -47,7 +47,7 @@ const searchLocationName = async (query) => {
 // 2. Gemini Analysis Service
 const analyzeLocationWithGemini = async (apiKey, businessType, lat, lng, locationName) => {
   const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+  const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
   const prompt = `
     I want to open a "${businessType}" at coordinates ${lat}, ${lng} (Near ${locationName}) in Delhi, India.

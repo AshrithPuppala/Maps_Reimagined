@@ -5,48 +5,115 @@ import math
 from datetime import datetime
 from shapely.geometry import shape, Point
 import geopandas as gpd
+import os
 
 app = Flask(__name__)
 CORS(app)
+
+# Load datasets
+def load_datasets():
+    """Load all geospatial datasets"""
+    try:
+        # Check if files exist
+        base_path = 'data'
+        files_to_check = [
+            'delhi_future_events.json',
+            'delhi_area.geojson',
+            'delhi_pincode.geojson',
+            'delhi_points.geojson'
+        ]
+        
+        print("=== Checking data files ===")
+        for file in files_to_check:
+            file_path = os.path.join(base_path, file)
+            exists = os.path.exists(file_path)
+            print(f"{file}: {'✓ EXISTS' if exists else '✗ MISSING'}")
+            if exists:
+                print(f"  Size: {os.path.getsize(file_path)} bytes")
+        
+        # Load future events JSON
+        print("\n=== Loading future events ===")
+        with open('data/delhi_future_events.json', 'r') as f:
+            future_events = json.load(f)
+        print(f"✓ Loaded {len(future_events)} future events")
+        
+        # Load GeoJSON files with error handling
+        print("\n=== Loading GeoJSON files ===")
+        
+        print("Loading delhi_area.geojson...")
+        delhi_areas = gpd.read_file('data/delhi_area.geojson')
+        print(f"✓ Loaded {len(delhi_areas)} areas")
+        print(f"  Columns: {list(delhi_areas.columns)}")
+        print(f"  CRS: {delhi_areas.crs}")
+        print(f"  Has geometry: {'geometry' in delhi_areas.columns}")
+        
+        print("\nLoading delhi_pincode.geojson...")
+        delhi_pincodes = gpd.read_file('data/delhi_pincode.geojson')
+        print(f"✓ Loaded {len(delhi_pincodes)} pincodes")
+        print(f"  Columns: {list(delhi_pincodes.columns)}")
+        print(f"  CRS: {delhi_pincodes.crs}")
+        
+        print("\nLoading delhi_points.geojson...")
+        delhi_points = gpd.read_file('data/delhi_points.geojson')
+        print(f"✓ Loaded {len(delhi_points)} points")
+        print(f"  Columns: {list(delhi_points.columns)}")
+        print(f"  CRS: {delhi_points.crs}")
+        
+        print("\n=== All datasets loaded successfully! ===\n")
+        
+        return future_events, delhi_areas, delhi_pincodes, delhi_points
+        
+    except FileNotFoundError as e:
+        print(f"❌ File not found: {e}")
+        print("Please ensure all data files are in the 'data' directory")
+        # Return empty but valid structures
+        return [], gpd.GeoDataFrame(columns=['geometry'], geometry='geometry'), \
+               gpd.GeoDataFrame(columns=['geometry'], geometry='geometry'), \
+               gpd.GeoDataFrame(columns=['geometry'], geometry='geometry')
+    
+    except Exception as e:
+        print(f"❌ Error loading datasets: {e}")
+        import traceback
+        traceback.print_exc()
+        # Return empty but valid structures
+        return [], gpd.GeoDataFrame(columns=['geometry'], geometry='geometry'), \
+               gpd.GeoDataFrame(columns=['geometry'], geometry='geometry'), \
+               gpd.GeoDataFrame(columns=['geometry'], geometry='geometry')
+
+# Initialize datasets
+print("=" * 60)
+print("INITIALIZING MAPS REIMAGINED API")
+print("=" * 60)
+FUTURE_EVENTS, DELHI_AREAS, DELHI_PINCODES, DELHI_POINTS = load_datasets()
+print("=" * 60)
+
 @app.route('/')
 def home():
     """Root endpoint"""
+    datasets_loaded = (
+        len(FUTURE_EVENTS) > 0 and 
+        not DELHI_AREAS.empty and 
+        not DELHI_PINCODES.empty and 
+        not DELHI_POINTS.empty
+    )
+    
     return jsonify({
         'status': 'online',
         'message': 'Maps Reimagined Business Feasibility API',
         'version': '1.0',
+        'datasets_loaded': datasets_loaded,
+        'dataset_counts': {
+            'future_events': len(FUTURE_EVENTS),
+            'areas': len(DELHI_AREAS),
+            'pincodes': len(DELHI_PINCODES),
+            'points': len(DELHI_POINTS)
+        },
         'endpoints': {
             'analyze': '/api/analyze (POST)',
             'events': '/api/events (GET)',
             'health': '/api/health (GET)'
         }
     }), 200
-# Load datasets
-def load_datasets():
-    """Load all geospatial datasets"""
-    try:
-        with open('data/delhi_future_events.json', 'r') as f:
-            future_events = json.load(f)
-        
-        # Fix: Use correct filenames from your data folder
-        delhi_areas = gpd.read_file('data/delhi_area.geojson')
-        delhi_pincodes = gpd.read_file('data/delhi_pincode.geojson')  # Changed from delhi_pincodes
-        delhi_points = gpd.read_file('data/delhi_points.geojson')
-        
-        # Verify they loaded correctly
-        print(f"✓ Loaded {len(delhi_areas)} areas")
-        print(f"✓ Loaded {len(delhi_pincodes)} pincodes")
-        print(f"✓ Loaded {len(delhi_points)} points")
-        print(f"✓ Loaded {len(future_events)} future events")
-        
-        return future_events, delhi_areas, delhi_pincodes, delhi_points
-    except Exception as e:
-        print(f"Error loading datasets: {e}")
-        import traceback
-        traceback.print_exc()  # This will show the full error
-        return [], gpd.GeoDataFrame(), gpd.GeoDataFrame(), gpd.GeoDataFrame()
-
-FUTURE_EVENTS, DELHI_AREAS, DELHI_PINCODES, DELHI_POINTS = load_datasets()
 
 def haversine_distance(lat1, lon1, lat2, lon2):
     """Calculate distance between two coordinates in meters"""
@@ -65,32 +132,33 @@ def haversine_distance(lat1, lon1, lat2, lon2):
 def geocode_location(area_name, pincode):
     """Get coordinates from area name or pincode"""
     # Try to find in areas dataset
-    if DELHI_AREAS is not None:
-        area_match = DELHI_AREAS[DELHI_AREAS['name'].str.contains(area_name, case=False, na=False)]
-        if not area_match.empty:
-            centroid = area_match.iloc[0].geometry.centroid
-            return centroid.y, centroid.x
+    if not DELHI_AREAS.empty and 'name' in DELHI_AREAS.columns:
+        try:
+            area_match = DELHI_AREAS[DELHI_AREAS['name'].str.contains(area_name, case=False, na=False)]
+            if not area_match.empty:
+                centroid = area_match.iloc[0].geometry.centroid
+                return centroid.y, centroid.x
+        except Exception as e:
+            print(f"Error searching areas: {e}")
     
     # Try to find in pincodes dataset
-    if DELHI_PINCODES is not None and pincode:
-        pincode_match = DELHI_PINCODES[DELHI_PINCODES['pincode'] == pincode]
-        if not pincode_match.empty:
-            centroid = pincode_match.iloc[0].geometry.centroid
-            return centroid.y, centroid.x
+    if not DELHI_PINCODES.empty and 'pincode' in DELHI_PINCODES.columns and pincode:
+        try:
+            pincode_match = DELHI_PINCODES[DELHI_PINCODES['pincode'] == pincode]
+            if not pincode_match.empty:
+                centroid = pincode_match.iloc[0].geometry.centroid
+                return centroid.y, centroid.x
+        except Exception as e:
+            print(f"Error searching pincodes: {e}")
     
     # Default to Delhi center
+    print(f"Using default coordinates for {area_name}")
     return 28.7041, 77.1025
 
 def calculate_risk_score(positive_impacts, negative_impacts, business_type, location_factors):
     """
     Calculate risk score using the formula:
     Risk = Base_Risk + (Avg_Negative_Impact × 40) - (Avg_Positive_Impact × 30) + Location_Factor
-    
-    Where:
-    - Base_Risk = 50 (neutral starting point)
-    - Avg_Negative_Impact: Average of all negative impact scores (0 to 1)
-    - Avg_Positive_Impact: Average of all positive impact scores (0 to 1)
-    - Location_Factor: Adjustment based on existing infrastructure (-10 to +10)
     """
     base_risk = 50
     
@@ -163,8 +231,6 @@ def find_alternative_locations(business_type, current_risk, delhi_areas_data):
 
 def suggest_alternative_businesses(business_type, area_characteristics):
     """Suggest alternative business types for the same location"""
-    suggestions = []
-    
     # Business type mapping based on common patterns
     business_alternatives = {
         'cafe': [
@@ -245,10 +311,13 @@ def analyze_feasibility():
         
         # Calculate location factors based on nearby points
         location_factor = 0
-        if DELHI_POINTS is not None:
-            point = Point(lng, lat)
-            nearby_points = DELHI_POINTS[DELHI_POINTS.geometry.distance(point) < 0.01]  # ~1km
-            location_factor = len(nearby_points) * 0.5  # Positive factor for infrastructure
+        if not DELHI_POINTS.empty:
+            try:
+                point = Point(lng, lat)
+                nearby_points = DELHI_POINTS[DELHI_POINTS.geometry.distance(point) < 0.01]  # ~1km
+                location_factor = len(nearby_points) * 0.5  # Positive factor for infrastructure
+            except Exception as e:
+                print(f"Error calculating location factor: {e}")
         
         # Calculate risk score
         risk_score = calculate_risk_score(positive_impacts, negative_impacts, business_type, location_factor)
@@ -286,6 +355,8 @@ def analyze_feasibility():
         
     except Exception as e:
         print(f"Error in analysis: {e}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/events', methods=['GET'])
@@ -296,7 +367,22 @@ def get_all_events():
 @app.route('/api/health', methods=['GET'])
 def health_check():
     """Health check endpoint"""
-    return jsonify({'status': 'healthy'}), 200
+    datasets_ok = (
+        len(FUTURE_EVENTS) > 0 and 
+        not DELHI_AREAS.empty and 
+        not DELHI_PINCODES.empty and 
+        not DELHI_POINTS.empty
+    )
+    
+    return jsonify({
+        'status': 'healthy' if datasets_ok else 'degraded',
+        'datasets': {
+            'future_events': len(FUTURE_EVENTS),
+            'areas': len(DELHI_AREAS),
+            'pincodes': len(DELHI_PINCODES),
+            'points': len(DELHI_POINTS)
+        }
+    }), 200
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)

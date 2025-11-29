@@ -7,16 +7,12 @@ import os
 
 app = Flask(__name__)
 
-# Fixed CORS configuration
+# CRITICAL: Allow your Render frontend domain
 CORS(app, resources={
     r"/*": {
-        "origins": [
-            "http://localhost:3000",
-            "https://maps-reimagined-vljw.onrender.com",
-            "https://*.onrender.com"
-        ],
+        "origins": "*",  # For development - restrict in production
         "methods": ["GET", "POST", "OPTIONS"],
-        "allow_headers": ["Content-Type"]
+        "allow_headers": ["Content-Type", "Authorization"]
     }
 })
 
@@ -200,11 +196,16 @@ def find_alternative_locations(current_risk):
     alternatives = [area for area in potential_areas if area['base_risk'] < current_risk]
     return sorted(alternatives, key=lambda x: x['base_risk'])[:3]
 
-@app.route('/api/analyze', methods=['POST'])
+@app.route('/api/analyze', methods=['POST', 'OPTIONS'])
 def analyze_feasibility():
     """Main API endpoint for business feasibility analysis"""
+    if request.method == 'OPTIONS':
+        return '', 204
+        
     try:
         data = request.json
+        print(f"Received request: {data}")
+        
         business_type = data.get('businessType', '')
         area_name = data.get('location', '')
         pincode = data.get('pincode', '')
@@ -213,6 +214,7 @@ def analyze_feasibility():
             return jsonify({'error': 'Business type and location are required'}), 400
         
         lat, lng = geocode_location(area_name, pincode)
+        print(f"Geocoded to: {lat}, {lng}")
         
         # Find relevant future events
         relevant_events = []
@@ -261,13 +263,14 @@ def analyze_feasibility():
             'formula': 'Risk = 50 + (Avg_Negative × 40) - (Avg_Positive × 30) + Location_Factor'
         }
         
+        print(f"Sending response: Risk={risk_score}, Events={len(relevant_events)}")
         return jsonify(response), 200
         
     except Exception as e:
         print(f"Error in analysis: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'details': 'Check server logs'}), 500
 
 @app.route('/api/events', methods=['GET'])
 def get_all_events():

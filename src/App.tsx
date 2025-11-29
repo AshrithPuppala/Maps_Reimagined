@@ -39,6 +39,8 @@ interface SimulationConfig {
   timeOfDay: string;
 }
 
+const MAPILLARY_API_KEY = 'MLY|25379176438437050|fd3bd452808882ea14e6749dc065c20f';
+
 const FALLBACK_DATA: GeoJSONCollection = {
   type: "FeatureCollection",
   features: [
@@ -95,22 +97,54 @@ const FALLBACK_DATA: GeoJSONCollection = {
   ]
 };
 
-const StreetView3D: React.FC<{
+const MapillaryStreetView: React.FC<{
   location: SelectedLocation;
   config: SimulationConfig;
 }> = ({ location, config }) => {
   const mountRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
+  const [streetViewImage, setStreetViewImage] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [heading, setHeading] = useState(0);
 
   useEffect(() => {
-    if (!mountRef.current) return;
+    const fetchMapillaryImage = async () => {
+      setLoading(true);
+      setError(null);
+      
+      try {
+        const [lat, lng] = location.coordinates;
+        const radius = 100;
+        
+        const searchUrl = `https://graph.mapillary.com/images?access_token=${MAPILLARY_API_KEY}&fields=id,thumb_2048_url,computed_compass_angle&bbox=${lng-0.001},${lat-0.001},${lng+0.001},${lat+0.001}&limit=1`;
+        
+        const response = await fetch(searchUrl);
+        const data = await response.json();
+        
+        if (data.data && data.data.length > 0) {
+          setStreetViewImage(data.data[0].thumb_2048_url);
+          if (data.data[0].computed_compass_angle) {
+            setHeading(data.data[0].computed_compass_angle);
+          }
+        } else {
+          setError('No street view imagery available for this location');
+        }
+      } catch (err) {
+        console.error('Mapillary fetch error:', err);
+        setError('Failed to load street view');
+      } finally {
+        setLoading(false);
+      }
+    };
 
-    setLoading(true);
+    fetchMapillaryImage();
+  }, [location]);
+
+  useEffect(() => {
+    if (!mountRef.current || !streetViewImage) return;
+
     const container = mountRef.current;
-    
     const scene = new THREE.Scene();
-    scene.fog = new THREE.Fog(0x87CEEB, 100, 500);
     
     const camera = new THREE.PerspectiveCamera(
       75,
@@ -118,46 +152,36 @@ const StreetView3D: React.FC<{
       0.1,
       1000
     );
-    camera.position.set(0, 1.6, 5);
+    camera.position.set(0, 1.6, 3);
 
-    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    const renderer = new THREE.WebGLRenderer({ 
+      antialias: true,
+      alpha: true 
+    });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.shadowMap.enabled = true;
     container.appendChild(renderer.domElement);
 
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    const textureLoader = new THREE.TextureLoader();
+    textureLoader.load(streetViewImage, (texture) => {
+      const sphereGeometry = new THREE.SphereGeometry(500, 60, 40);
+      sphereGeometry.scale(-1, 1, 1);
+      const sphereMaterial = new THREE.MeshBasicMaterial({ map: texture });
+      const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
+      scene.add(sphere);
+    });
+
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
     scene.add(ambientLight);
 
-    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    directionalLight.position.set(10, 20, 10);
-    directionalLight.castShadow = true;
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 0.5);
+    directionalLight.position.set(5, 10, 5);
     scene.add(directionalLight);
-
-    const groundGeometry = new THREE.PlaneGeometry(200, 200);
-    const groundMaterial = new THREE.MeshStandardMaterial({ 
-      color: 0x555555,
-      roughness: 0.8
-    });
-    const ground = new THREE.Mesh(groundGeometry, groundMaterial);
-    ground.rotation.x = -Math.PI / 2;
-    ground.receiveShadow = true;
-    scene.add(ground);
-
-    const sidewalkGeometry = new THREE.BoxGeometry(4, 0.2, 100);
-    const sidewalkMaterial = new THREE.MeshStandardMaterial({ color: 0x888888 });
-    const sidewalk1 = new THREE.Mesh(sidewalkGeometry, sidewalkMaterial);
-    sidewalk1.position.set(-8, 0.1, 0);
-    scene.add(sidewalk1);
-
-    const sidewalk2 = new THREE.Mesh(sidewalkGeometry, sidewalkMaterial);
-    sidewalk2.position.set(8, 0.1, 0);
-    scene.add(sidewalk2);
 
     const createShop = () => {
       const shopGroup = new THREE.Group();
 
-      const buildingGeometry = new THREE.BoxGeometry(8, 5, 6);
+      const buildingGeometry = new THREE.BoxGeometry(4, 3, 3);
       let buildingColor = 0xE8D5C4;
       
       switch(config.architecturalStyle) {
@@ -180,127 +204,117 @@ const StreetView3D: React.FC<{
 
       const buildingMaterial = new THREE.MeshStandardMaterial({ 
         color: buildingColor,
-        roughness: 0.7
+        roughness: 0.6,
+        metalness: 0.2,
+        transparent: true,
+        opacity: 0.9
       });
       const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
-      building.position.y = 2.5;
-      building.castShadow = true;
+      building.position.y = 1.5;
       shopGroup.add(building);
 
-      const glassGeometry = new THREE.BoxGeometry(6, 3, 0.2);
+      const glassGeometry = new THREE.BoxGeometry(3, 2, 0.1);
       const glassMaterial = new THREE.MeshPhysicalMaterial({
         color: 0x88CCFF,
         transparent: true,
-        opacity: 0.4,
+        opacity: 0.3,
         metalness: 0.1,
         roughness: 0.1
       });
       const glass = new THREE.Mesh(glassGeometry, glassMaterial);
-      glass.position.set(0, 2, 3.1);
+      glass.position.set(0, 1.5, 1.55);
       shopGroup.add(glass);
 
-      const doorGeometry = new THREE.BoxGeometry(1.5, 2.5, 0.2);
+      const doorGeometry = new THREE.BoxGeometry(1, 2, 0.1);
       const doorMaterial = new THREE.MeshStandardMaterial({ 
-        color: config.architecturalStyle === 'Cyberpunk Neon' ? 0xFF0080 : 0x654321
+        color: config.architecturalStyle === 'Cyberpunk Neon' ? 0xFF0080 : 0x654321,
+        transparent: true,
+        opacity: 0.9
       });
       const door = new THREE.Mesh(doorGeometry, doorMaterial);
-      door.position.set(-2, 1.25, 3.1);
+      door.position.set(-1.2, 1, 1.55);
       shopGroup.add(door);
 
-      const signGeometry = new THREE.BoxGeometry(6, 0.8, 0.3);
+      const signGeometry = new THREE.BoxGeometry(3.5, 0.4, 0.2);
       const signMaterial = new THREE.MeshStandardMaterial({ 
-        color: config.businessType.includes('Coffee') ? 0x6F4E37 : 0x34495E
+        color: config.businessType.includes('Coffee') ? 0x6F4E37 : 0x34495E,
+        transparent: true,
+        opacity: 0.95
       });
       const sign = new THREE.Mesh(signGeometry, signMaterial);
-      sign.position.set(0, 4.8, 3.2);
+      sign.position.set(0, 3.2, 1.6);
       shopGroup.add(sign);
 
+      const textCanvas = document.createElement('canvas');
+      textCanvas.width = 512;
+      textCanvas.height = 128;
+      const ctx = textCanvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 48px Arial';
+        ctx.textAlign = 'center';
+        ctx.fillText(config.businessType.toUpperCase(), 256, 80);
+      }
+      const textTexture = new THREE.CanvasTexture(textCanvas);
+      const textMaterial = new THREE.MeshBasicMaterial({ 
+        map: textTexture,
+        transparent: true,
+        opacity: 0.9
+      });
+      const textMesh = new THREE.Mesh(
+        new THREE.PlaneGeometry(3.4, 0.35),
+        textMaterial
+      );
+      textMesh.position.set(0, 3.2, 1.71);
+      shopGroup.add(textMesh);
+
       if (config.architecturalStyle === 'Cyberpunk Neon') {
-        const neonLight1 = new THREE.PointLight(0xFF0080, 2, 10);
-        neonLight1.position.set(-2, 4.5, 3.5);
+        const neonLight1 = new THREE.PointLight(0xFF0080, 1.5, 8);
+        neonLight1.position.set(-1, 3, 2);
         shopGroup.add(neonLight1);
 
-        const neonLight2 = new THREE.PointLight(0x00FFFF, 2, 10);
-        neonLight2.position.set(2, 4.5, 3.5);
+        const neonLight2 = new THREE.PointLight(0x00FFFF, 1.5, 8);
+        neonLight2.position.set(1, 3, 2);
         shopGroup.add(neonLight2);
       }
 
       if (config.architecturalStyle === 'Traditional Indian Heritage') {
-        const awningGeometry = new THREE.ConeGeometry(4, 1, 4);
-        const awningMaterial = new THREE.MeshStandardMaterial({ color: 0xFF6347 });
+        const awningGeometry = new THREE.ConeGeometry(2.5, 0.8, 4);
+        const awningMaterial = new THREE.MeshStandardMaterial({ 
+          color: 0xFF6347,
+          transparent: true,
+          opacity: 0.9
+        });
         const awning = new THREE.Mesh(awningGeometry, awningMaterial);
         awning.rotation.y = Math.PI / 4;
-        awning.position.set(0, 5.5, 2);
+        awning.position.set(0, 3.5, 1.2);
         shopGroup.add(awning);
       }
 
       if (config.architecturalStyle === 'Eco-Friendly Green') {
         for (let i = 0; i < 3; i++) {
-          const plantGeometry = new THREE.ConeGeometry(0.3, 1, 8);
-          const plantMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
+          const plantGeometry = new THREE.ConeGeometry(0.2, 0.6, 8);
+          const plantMaterial = new THREE.MeshStandardMaterial({ 
+            color: 0x228B22,
+            transparent: true,
+            opacity: 0.9
+          });
           const plant = new THREE.Mesh(plantGeometry, plantMaterial);
-          plant.position.set(-3 + i * 1.5, 0.5, 3.5);
+          plant.position.set(-1.5 + i * 0.8, 0.3, 1.7);
           shopGroup.add(plant);
         }
       }
 
-      shopGroup.position.set(-10, 0, -10);
+      shopGroup.position.set(0, 0, -5);
       return shopGroup;
     };
 
     const shop = createShop();
     scene.add(shop);
 
-    for (let i = 0; i < 5; i++) {
-      const height = 8 + Math.random() * 10;
-      const buildingGeometry = new THREE.BoxGeometry(6, height, 8);
-      const buildingMaterial = new THREE.MeshStandardMaterial({ 
-        color: Math.random() * 0xffffff,
-        roughness: 0.8
-      });
-      const building = new THREE.Mesh(buildingGeometry, buildingMaterial);
-      building.position.set(
-        -15 + i * 8,
-        height / 2,
-        -30 - Math.random() * 20
-      );
-      building.castShadow = true;
-      scene.add(building);
-    }
-
-    for (let i = 0; i < 6; i++) {
-      const trunkGeometry = new THREE.CylinderGeometry(0.3, 0.4, 3);
-      const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
-      const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
-
-      const foliageGeometry = new THREE.SphereGeometry(1.5, 8, 8);
-      const foliageMaterial = new THREE.MeshStandardMaterial({ color: 0x228B22 });
-      const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
-      foliage.position.y = 3;
-
-      const tree = new THREE.Group();
-      tree.add(trunk);
-      tree.add(foliage);
-      tree.position.set(
-        i % 2 === 0 ? -10 : 10,
-        1.5,
-        -15 + i * 8
-      );
-      scene.add(tree);
-    }
-
-    const skyGeometry = new THREE.SphereGeometry(400, 32, 32);
-    const skyMaterial = new THREE.MeshBasicMaterial({ 
-      color: config.timeOfDay.includes('Night') ? 0x000428 : 0x87CEEB,
-      side: THREE.BackSide
-    });
-    const sky = new THREE.Mesh(skyGeometry, skyMaterial);
-    scene.add(sky);
-
-    setLoading(false);
-
     let isDragging = false;
     let previousMouseX = 0;
+    let currentRotation = heading;
 
     const onMouseDown = (e: MouseEvent) => {
       isDragging = true;
@@ -310,7 +324,7 @@ const StreetView3D: React.FC<{
     const onMouseMove = (e: MouseEvent) => {
       if (isDragging) {
         const deltaX = e.clientX - previousMouseX;
-        setHeading(prev => prev + deltaX * 0.5);
+        currentRotation += deltaX * 0.3;
         previousMouseX = e.clientX;
       }
     };
@@ -327,9 +341,12 @@ const StreetView3D: React.FC<{
     const animate = () => {
       animationId = requestAnimationFrame(animate);
       
-      camera.position.x = Math.sin(heading * Math.PI / 180) * 5;
-      camera.position.z = Math.cos(heading * Math.PI / 180) * 5;
-      camera.lookAt(shop.position);
+      const rad = currentRotation * Math.PI / 180;
+      camera.position.x = Math.sin(rad) * 3;
+      camera.position.z = Math.cos(rad) * 3;
+      camera.lookAt(0, 1.5, -5);
+      
+      shop.rotation.y = -rad + Math.PI;
       
       renderer.render(scene, camera);
     };
@@ -368,28 +385,44 @@ const StreetView3D: React.FC<{
       });
       renderer.dispose();
     };
-  }, [location, config, heading]);
+  }, [streetViewImage, config, heading]);
 
   return (
     <div className="relative w-full h-full">
       <div ref={mountRef} className="w-full h-full bg-gray-900 rounded-xl overflow-hidden" />
       {loading && (
-        <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 rounded-xl">
           <div className="text-white text-center">
             <svg className="animate-spin h-8 w-8 text-indigo-500 mx-auto mb-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            <p className="text-sm">Building 3D scene...</p>
+            <p className="text-sm">Loading street view...</p>
           </div>
         </div>
       )}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-4 py-2 rounded-full backdrop-blur-md pointer-events-none">
-        Drag to rotate • {location.name}
-      </div>
-      <div className="absolute top-3 right-3 bg-indigo-600/90 text-white text-xs font-bold px-3 py-1 rounded-lg shadow-lg backdrop-blur-sm">
-        3D STREET VIEW
-      </div>
+      {error && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gray-900 rounded-xl">
+          <div className="bg-amber-500/20 border border-amber-500 text-white px-6 py-4 rounded-lg max-w-sm text-center">
+            <p className="font-semibold mb-2">⚠️ Street View Unavailable</p>
+            <p className="text-sm opacity-90">{error}</p>
+            <p className="text-xs mt-2 opacity-75">Try selecting a different location</p>
+          </div>
+        </div>
+      )}
+      {!loading && !error && (
+        <>
+          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-xs px-4 py-2 rounded-full backdrop-blur-md pointer-events-none">
+            🖱️ Drag to rotate • 🏪 3D Shop Model • 📸 Real Street View
+          </div>
+          <div className="absolute top-3 right-3 bg-indigo-600/90 text-white text-xs font-bold px-3 py-1 rounded-lg shadow-lg backdrop-blur-sm">
+            MAPILLARY STREET VIEW
+          </div>
+          <div className="absolute top-3 left-3 bg-green-600/90 text-white text-xs font-bold px-3 py-1 rounded-lg shadow-lg backdrop-blur-sm">
+            3D SHOP MODEL
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -405,7 +438,7 @@ const SimpleMap: React.FC<{
     <div className="relative w-full h-full bg-gradient-to-br from-blue-50 to-indigo-100 p-8 overflow-auto">
       <div className="max-w-4xl mx-auto">
         <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">
-          Select a Location in Delhi
+          📍 Select a Location in Delhi
         </h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {data.features.map((feature, index) => {
@@ -446,7 +479,7 @@ const SimpleMap: React.FC<{
                       {feature.properties.pin_code && ` • PIN: ${feature.properties.pin_code}`}
                     </p>
                     <p className="text-xs text-gray-400 mt-2">
-                      {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
+                      📌 {centerLat.toFixed(4)}, {centerLng.toFixed(4)}
                     </p>
                   </div>
                 </div>
@@ -526,7 +559,7 @@ const App: React.FC = () => {
             <h1 className="text-xl font-bold flex items-center gap-2">
               🏪 DelhiBizViz
             </h1>
-            <p className="text-indigo-100 text-sm mt-1">3D Business Location Visualizer</p>
+            <p className="text-indigo-100 text-sm mt-1">Real Street View + 3D Shop Model</p>
           </div>
 
           <div className="p-6 space-y-6 flex-1 overflow-y-auto">
@@ -563,7 +596,7 @@ const App: React.FC = () => {
             </div>
 
             <div className="space-y-4">
-              <label className="text-xs font-semibold text-gray-500 uppercase">Configuration</label>
+              <label className="text-xs font-semibold text-gray-500 uppercase">Shop Configuration</label>
               
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Business Type</label>
@@ -573,11 +606,12 @@ const App: React.FC = () => {
                   className="w-full rounded-lg border border-gray-300 p-2 text-sm"
                 >
                   <option value="Coffee Shop">☕ Coffee Shop</option>
-                  <option value="Boutique Clothing Store">👗 Boutique Clothing</option>
+                  <option value="Boutique">👗 Boutique</option>
                   <option value="Bakery">🥐 Bakery</option>
-                  <option value="Tech Startup Office">💻 Tech Office</option>
+                  <option value="Tech Office">💻 Tech Office</option>
                   <option value="Restaurant">🍽️ Restaurant</option>
                   <option value="Bookstore">📚 Bookstore</option>
+                  <option value="Gym">💪 Fitness Gym</option>
                 </select>
               </div>
 
@@ -595,31 +629,22 @@ const App: React.FC = () => {
                   <option value="Eco-Friendly Green">Eco-Friendly</option>
                 </select>
               </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Time of Day</label>
-                <select
-                  value={config.timeOfDay}
-                  onChange={(e) => setConfig({ ...config, timeOfDay: e.target.value })}
-                  className="w-full rounded-lg border border-gray-300 p-2 text-sm"
-                >
-                  <option value="Sunny afternoon">☀️ Sunny Afternoon</option>
-                  <option value="Golden hour sunset">🌅 Golden Hour</option>
-                  <option value="Rainy evening">🌧️ Rainy Evening</option>
-                  <option value="Night with street lights">🌙 Night</option>
-                </select>
-              </div>
             </div>
 
             {selectedLocation && (
               <div className="space-y-3 pt-4 border-t">
-                <h3 className="text-sm font-semibold text-gray-900 uppercase">3D Street View</h3>
-                <div className="w-full h-[400px] rounded-xl overflow-hidden shadow-lg border border-gray-200">
-                  <StreetView3D location={selectedLocation} config={config} />
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-semibold text-gray-900 uppercase">Live Preview</h3>
+                  <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Real Imagery + 3D Model</span>
                 </div>
-                <p className="text-xs text-gray-500 text-center">
-                  💡 This is a procedurally generated 3D scene based on your location and preferences
-                </p>
+                <div className="w-full h-[450px] rounded-xl overflow-hidden shadow-lg border border-gray-200">
+                  <MapillaryStreetView location={selectedLocation} config={config} />
+                </div>
+                <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                  <p className="text-xs text-blue-800">
+                    <strong>📸 Mapillary Integration:</strong> Real street-level imagery from the selected location with an interactive 3D shop model overlay.
+                  </p>
+                </div>
               </div>
             )}
           </div>

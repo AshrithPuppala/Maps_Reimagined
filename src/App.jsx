@@ -129,7 +129,7 @@ export default function BusinessLocationAnalyzer() {
     try {
       // Using geocoder API with geoid to get lat/lon and full details
       const response = await fetch(
-        `https://api.latlong.in/v2/ge_er.json?geo=${geoid}`,
+        `https://apihub.latlong.ai/v5/autosuggest.json?query=${geoid}`,
         {
           method: 'GET',
           headers: {

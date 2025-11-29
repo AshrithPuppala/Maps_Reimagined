@@ -1,0 +1,119 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from IPython.display import Image, display
+
+# --- 1. SIMULATED DEMOGRAPHY DATASET ---
+
+def get_demography_data():
+    """
+    Simulates business demography data over three years for 10 key micro-markets.
+    The data reflects a 'Success Index' (proxy for tenant occupancy/stability) and
+    a 'Failure Index' (proxy for vacancy/churn). Scores scaled 0-100.
+    """
+    data = {
+        'Micro_Market': [
+            'Delhi CBD (Connaught Place)', 'Cyber City (Gurugram)', 'Golf Course Road (Gurugram)',
+            'Noida Expressway (Sect 125/135)', 'South-East Delhi (Nehru Place)',
+            'Sector 62 (Noida)', 'Udyog Vihar (Gurugram)', 'Sohna Road (Gurugram)',
+            'Okhla Industrial Area', 'Laxmi Nagar (East Delhi)'
+        ],
+
+        # Simulated Success Index (Tenant Stability & Growth)
+        'Success_2023': [85, 90, 75, 60, 65, 55, 70, 50, 45, 60],
+        'Success_2024': [88, 95, 80, 75, 68, 65, 75, 58, 48, 63],
+        'Success_2025': [90, 98, 85, 85, 70, 75, 80, 65, 50, 68],
+
+        # Simulated Failure Index (Vacancy & Churn Rate) - Inverse correlation to Success
+        'Failure_2023': [15, 10, 25, 40, 35, 45, 30, 50, 55, 40],
+        'Failure_2024': [12, 5, 20, 25, 32, 35, 25, 42, 52, 37],
+        'Failure_2025': [10, 2, 15, 15, 30, 25, 20, 35, 50, 32],
+    }
+    df = pd.DataFrame(data)
+
+    # Calculate Net Market Confidence Index (Success - Failure)
+    df['Net_Confidence_2025'] = df['Success_2025'] - df['Failure_2025']
+
+    df = df.sort_values(by='Net_Confidence_2025', ascending=False).reset_index(drop=True)
+    return df
+
+# --- 2. DATA VISUALIZATION (Graph Generation) ---
+
+def generate_demography_trends_graph(df):
+    """
+    Generates a trend graph showing historical Success/Failure indices for the top 5 markets.
+    """
+
+    # Select the top 5 markets based on Net Confidence in 2025
+    top_5_markets = df.head(5)
+
+    # Prepare data for plotting
+    years = [2023, 2024, 2025]
+
+    plt.figure(figsize=(12, 6))
+
+    colors = plt.cm.viridis(np.linspace(0, 1, len(top_5_markets)))
+
+    for i, market in top_5_markets.iterrows():
+        # Success Trend
+        success_data = [market['Success_2023'], market['Success_2024'], market['Success_2025']]
+        plt.plot(years, success_data,
+                 label=f"{market['Micro_Market']} - Success",
+                 marker='o', linestyle='-', linewidth=2, color=colors[i])
+
+        # Failure Trend (Optional: Plotting failure helps visualize stability)
+        failure_data = [market['Failure_2023'], market['Failure_2024'], market['Failure_2025']]
+        plt.plot(years, failure_data,
+                 marker='x', linestyle='--', linewidth=1, color=colors[i], alpha=0.5)
+
+    plt.title('Business Demography Trend: Success & Failure Index (2023-2025)', fontsize=16)
+    plt.xlabel('Year', fontsize=14)
+    plt.ylabel('Index Score (0-100)', fontsize=14)
+    plt.xticks(years)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+    plt.legend(title="Market & Index Type", bbox_to_anchor=(1.05, 1), loc='upper left', fontsize='small')
+    plt.tight_layout()
+
+    # Save the plot to a file that can be displayed
+    graph_path = 'business_demography_trend.png'
+    plt.savefig(graph_path)
+    plt.close()
+
+    return graph_path
+
+# --- 3. EXECUTION ---
+if __name__ == '__main__':
+    # 1. Load and Analyze Data
+    demography_df = get_demography_data()
+
+    # 2. Generate Graph
+    graph_filename = generate_demography_trends_graph(demography_df)
+
+    # 3. Present Results
+    print("## 📈 Business Demography & Market Confidence Analysis")
+    print("### Proxies for Historical Business Success (Top 5 Markets)")
+    print("---")
+    print("This analysis uses a simulated 'Success Index' (proxy for low vacancy, high stability) and 'Failure Index' (proxy for high churn, high vacancy) over time.")
+
+    # Prepare the output table
+    output_cols = ['Micro_Market', 'Success Index (2025)', 'Failure Index (2025)', 'Net Confidence']
+
+    # Highlight the Top 5 Markets
+    top_5_results = demography_df.head(5).rename(columns={
+        'Success_2025': 'Success Index (2025)',
+        'Failure_2025': 'Failure Index (2025)',
+        'Net_Confidence_2025': 'Net Confidence'
+    })
+
+    print("\n#### Market Stability Ranking (Based on Net Confidence):")
+    print(top_5_results[output_cols].round(0).to_markdown(index=False))
+    print("---")
+
+    top_recommendation = demography_df.iloc[0]
+    print(f"\n🥇 **Most Historically Stable Market:** {top_recommendation['Micro_Market']}")
+    print(f"   (Net Confidence Index: **{top_recommendation['Net_Confidence_2025']:.0f} / 100**)")
+
+    print("\n#### Trend Visualization")
+    print("The following graph shows the historical trends of the Success and Failure Indices for the top 5 markets from 2023 to 2025.")
+    # Display the generated image
+    display(Image(graph_filename))

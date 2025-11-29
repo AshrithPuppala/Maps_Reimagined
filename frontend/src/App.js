@@ -106,4 +106,190 @@ const BusinessFeasibilityTool = () => {
               </label>
               <input
                 type="text"
-                value={business
+                value={businessType}
+                onChange={(e) => setBusinessType(e.target.value)}
+                placeholder="e.g., Cafe, Restaurant, Gym"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Area Name *
+              </label>
+              <input
+                type="text"
+                value={location}
+                onChange={(e) => setLocation(e.target.value)}
+                placeholder="e.g., Connaught Place"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              />
+            </div>
+            
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Pincode (Optional)
+              </label>
+              <input
+                type="text"
+                value={pincode}
+                onChange={(e) => setPincode(e.target.value)}
+                placeholder="e.g., 110001"
+                maxLength="6"
+                className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-all"
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div className="mt-4 bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              <span>{error}</span>
+            </div>
+          )}
+
+          <button
+            onClick={analyzeLocation}
+            disabled={!businessType || !location || loading}
+            className="mt-6 w-full bg-gradient-to-r from-indigo-600 to-purple-600 text-white py-4 rounded-lg font-semibold hover:from-indigo-700 hover:to-purple-700 disabled:from-gray-400 disabled:to-gray-400 disabled:cursor-not-allowed transition-all transform hover:scale-[1.02] active:scale-[0.98] shadow-lg flex items-center justify-center gap-2"
+          >
+            {loading ? (
+              <>
+                <Loader className="w-5 h-5 animate-spin" />
+                Analyzing...
+              </>
+            ) : (
+              'Analyze Feasibility'
+            )}
+          </button>
+        </div>
+
+        {/* Results */}
+        {analysis && (
+          <div className="space-y-6">
+            {/* Risk Assessment */}
+            <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
+              <h2 className="text-2xl font-semibold mb-6 text-gray-800">Risk Assessment</h2>
+              
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                <div className={`border-l-4 p-6 rounded-lg ${getRiskBgColor(analysis.riskScore)}`}>
+                  <p className="text-gray-600 mb-2">Overall Risk Score</p>
+                  <div className="flex items-baseline gap-3">
+                    <span className={`text-6xl font-bold ${getRiskColor(analysis.riskScore)}`}>
+                      {analysis.riskScore}%
+                    </span>
+                    <span className={`text-xl font-semibold ${getRiskColor(analysis.riskScore)}`}>
+                      {analysis.riskLevel} Risk
+                    </span>
+                  </div>
+                </div>
+                
+                <div className="flex gap-4">
+                  <div className="flex-1 bg-gradient-to-br from-green-50 to-green-100 px-4 py-6 rounded-lg border border-green-200">
+                    <TrendingUp className="w-8 h-8 text-green-600 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600 text-center mb-1">Positive Events</p>
+                    <p className="text-3xl font-bold text-green-600 text-center">{analysis.positiveCount}</p>
+                  </div>
+                  <div className="flex-1 bg-gradient-to-br from-red-50 to-red-100 px-4 py-6 rounded-lg border border-red-200">
+                    <TrendingDown className="w-8 h-8 text-red-600 mx-auto mb-2" />
+                    <p className="text-sm text-gray-600 text-center mb-1">Negative Events</p>
+                    <p className="text-3xl font-bold text-red-600 text-center">{analysis.negativeCount}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="bg-gradient-to-r from-blue-50 to-indigo-50 border-l-4 border-blue-500 p-4 rounded-lg">
+                <p className="text-sm font-semibold text-gray-800 mb-1">Risk Calculation Formula:</p>
+                <p className="text-xs text-gray-700 font-mono">{analysis.formula}</p>
+              </div>
+            </div>
+
+            {/* Future Events */}
+            <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
+              <h2 className="text-2xl font-semibold mb-6 text-gray-800">
+                Future Impact Events ({analysis.events.length})
+              </h2>
+              
+              {analysis.events.length === 0 ? (
+                <div className="text-center py-8 text-gray-500">
+                  <AlertCircle className="w-12 h-12 mx-auto mb-3 opacity-50" />
+                  <p>No significant future events found in this area</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {analysis.events.map((event, idx) => (
+                    <div 
+                      key={idx}
+                      className={`border-l-4 p-5 rounded-lg transition-all hover:shadow-md ${
+                        event.impact.sentiment === 'POSITIVE' 
+                          ? 'border-green-500 bg-gradient-to-r from-green-50 to-white' 
+                          : 'border-red-500 bg-gradient-to-r from-red-50 to-white'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <h3 className="font-semibold text-lg text-gray-800 mb-2">{event.name}</h3>
+                          <p className="text-sm text-gray-600 mb-3">{event.description}</p>
+                          
+                          <div className="flex flex-wrap gap-4 text-sm text-gray-700">
+                            <div className="flex items-center gap-1">
+                              <Calendar className="w-4 h-4 text-indigo-600" />
+                              <span>Impact: {new Date(event.timelines.impact_start).toLocaleDateString('en-IN')}</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <MapPin className="w-4 h-4 text-indigo-600" />
+                              <span>{event.location.area_name}</span>
+                            </div>
+                            {event.distance_meters && (
+                              <div className="text-gray-500">
+                                {(event.distance_meters / 1000).toFixed(2)} km away
+                              </div>
+                            )}
+                          </div>
+                          
+                          <div className="mt-3 flex gap-2">
+                            <span className="text-xs bg-white px-3 py-1 rounded-full border border-gray-200 font-medium">
+                              {event.status}
+                            </span>
+                            <span className="text-xs bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full font-medium">
+                              {event.type.replace(/_/g, ' ')}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className={`text-right min-w-[100px] ${
+                          event.impact.sentiment === 'POSITIVE' ? 'text-green-600' : 'text-red-600'
+                        }`}>
+                          <p className="text-3xl font-bold">
+                            {event.impact.sentiment === 'POSITIVE' ? '+' : ''}
+                            {Math.round(event.impact.score * 100)}%
+                          </p>
+                          <p className="text-xs mt-1 font-medium">Impact Score</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* 10-Year Projection */}
+            <div className="bg-white rounded-xl shadow-2xl p-6 md:p-8 border border-indigo-100">
+              <h2 className="text-2xl font-semibold mb-6 text-gray-800">
+                10-Year Success Projection
+              </h2>
+              <div className="bg-gradient-to-r from-indigo-50 to-purple-50 p-4 rounded-lg mb-6">
+                <p className="text-sm text-gray-700">
+                  This projection accounts for the timing and decay of impact from all identified future events.
+                  Success probability adjusts as events materialize and their effects diminish over time.
+                </p>
+              </div>
+              <ResponsiveContainer width="100%" height={400}>
+                <AreaChart data={analysis.projectionData}>
+                  <defs>
+                    <linearGradient id="colorProb" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.8}/>
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0.2}/>
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" />

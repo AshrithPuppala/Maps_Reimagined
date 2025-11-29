@@ -25,11 +25,12 @@ const LoadingState = {
 // --- API SERVICES ---
 
 // 1. Geocoding Service (Free OpenStreetMap - No Key Required)
+// 1. Geocoding Service (Free OpenStreetMap - No Key Required)
 const searchLocationName = async (query) => {
   try {
     // We append "Delhi" to ensure results are relevant
     const response = await fetch(
-      https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query + " Delhi")}&limit=5`
     );
     const data = await response.json();
     return data.map(item => ({

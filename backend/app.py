@@ -8,7 +8,19 @@ import geopandas as gpd
 
 app = Flask(__name__)
 CORS(app)
-
+@app.route('/')
+def home():
+    """Root endpoint"""
+    return jsonify({
+        'status': 'online',
+        'message': 'Maps Reimagined Business Feasibility API',
+        'version': '1.0',
+        'endpoints': {
+            'analyze': '/api/analyze (POST)',
+            'events': '/api/events (GET)',
+            'health': '/api/health (GET)'
+        }
+    }), 200
 # Load datasets
 def load_datasets():
     """Load all geospatial datasets"""

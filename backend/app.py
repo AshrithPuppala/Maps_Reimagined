@@ -1,8 +1,12 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template
 from flask_cors import CORS
 import json
 import math
 from datetime import datetime
+import os
+
+# Note: shapely and pandas were imported but not strictly used in the provided snippet logic, 
+# but kept to maintain compatibility with your environment.
 from shapely.geometry import Point
 import pandas as pd
 
@@ -13,14 +17,18 @@ CORS(app)
 def load_datasets():
     """Load all geospatial datasets"""
     try:
-        # Load future events JSON (this works)
+        # Load future events JSON
         print("\n=== Loading future events ===")
-        with open('data/delhi_future_events.json', 'r') as f:
-            future_events = json.load(f)
-        print(f"✓ Loaded {len(future_events)} future events")
+        # Check if file exists, if not use empty list to prevent crash
+        if os.path.exists('data/delhi_future_events.json'):
+            with open('data/delhi_future_events.json', 'r') as f:
+                future_events = json.load(f)
+            print(f"✓ Loaded {len(future_events)} future events")
+        else:
+            print("! Warning: data/delhi_future_events.json not found. Using empty list.")
+            future_events = []
         
         # Create fallback location data as dictionaries
-        # This avoids GeoJSON/GeoPandas issues entirely
         delhi_areas_fallback = [
             {'name': 'Connaught Place', 'lat': 28.6315, 'lng': 77.2167},
             {'name': 'Karol Bagh', 'lat': 28.6519, 'lng': 77.1900},
@@ -68,9 +76,17 @@ print("=" * 60)
 FUTURE_EVENTS, DELHI_AREAS, DELHI_PINCODES = load_datasets()
 print("=" * 60)
 
+# --- CHANGED: This route now serves the HTML file instead of JSON ---
 @app.route('/')
 def home():
-    """Root endpoint"""
+    """Serve the frontend interface"""
+    # Flask looks for this file in a folder named 'templates'
+    return render_template('index.html')
+
+# --- NEW: Moved the old JSON status to a specific API endpoint ---
+@app.route('/api/status')
+def api_status():
+    """API Status endpoint"""
     datasets_loaded = (
         len(FUTURE_EVENTS) > 0 and 
         len(DELHI_AREAS) > 0 and 
@@ -155,7 +171,11 @@ def generate_10year_projection(events, business_type, base_success_rate=60):
         success_prob = base_success_rate
         
         for event in events:
-            impact_year = datetime.fromisoformat(event['timelines']['impact_start'].replace('Z', '')).year
+            # Handle potential ISO format issues or missing Z
+            try:
+                impact_year = datetime.fromisoformat(event['timelines']['impact_start'].replace('Z', '')).year
+            except:
+                impact_year = current_year # Fallback
             
             if year >= impact_year:
                 years_after_impact = year - impact_year

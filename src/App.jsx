@@ -52,7 +52,7 @@ export default function BusinessLocationAnalyzer() {
     'Gas Station'
   ];
 
-  // Autocomplete search for locations using V4 API
+  // Autocomplete search for locations using V2 API (correct endpoint)
   const searchLocation = async (query) => {
     if (!query || query.length < 2 || !apiKey) {
       setLocationSuggestions([]);
@@ -60,9 +60,9 @@ export default function BusinessLocationAnalyzer() {
     }
     
     try {
-      // Using V4 API which returns {code, status, data} format
+      // Using V2 API which returns {status, data: [{name, geo}]} format
       const response = await fetch(
-        `https://apihub.latlong.ai/v4/autocomplete.json?query=${encodeURIComponent(query + ' Delhi')}`,
+        `https://api.latlong.in/v2/autocomplete.json?query=${encodeURIComponent(query)}`,
         {
           headers: {
             'X-Authorization-Token': apiKey
@@ -74,16 +74,20 @@ export default function BusinessLocationAnalyzer() {
         const result = await response.json();
         console.log('Autocomplete response:', result);
         
-        if (result.code === 1001 && result.status === 'success' && result.data && result.data.length > 0) {
-          // Transform V4 API response to match our expected format
-          const suggestions = result.data.map(item => ({
+        if (result.status === 'Success' && result.data && result.data.length > 0) {
+          // Filter for Delhi locations
+          const delhiResults = result.data.filter(item => 
+            item.name.toLowerCase().includes('delhi')
+          );
+          
+          const suggestions = (delhiResults.length > 0 ? delhiResults : result.data).map(item => ({
             properties: {
               name: item.name,
               display_name: item.name,
-              geoid: item.geoid
+              geoid: item.geo
             },
             geometry: {
-              coordinates: [item.lon || 77.2090, item.lat || 28.6139] // Default to Delhi center if not provided
+              coordinates: [77.2090, 28.6139] // Will be fetched from geocoder later
             }
           }));
           setLocationSuggestions(suggestions.slice(0, 8));
@@ -111,12 +115,12 @@ export default function BusinessLocationAnalyzer() {
     return () => clearTimeout(timer);
   }, [targetArea, apiKey]);
 
-  // Get location details using geoid from V4 autocomplete
+  // Get location details using geoid from autocomplete
   const getLocationDetailsFromGeoid = async (geoid) => {
     try {
-      // Using geocoder with geoid to get full location details
+      // Using geocoder API with geoid to get lat/lon and full details
       const response = await fetch(
-        `https://apihub.latlong.ai/v1/geocoder.json?geoid=${geoid}`,
+        `https://api.latlong.in/v2/geocoder.json?geo=${geoid}`,
         {
           headers: {
             'X-Authorization-Token': apiKey
@@ -125,8 +129,11 @@ export default function BusinessLocationAnalyzer() {
       );
       
       if (response.ok) {
-        const data = await response.json();
-        return data;
+        const result = await response.json();
+        console.log('Geocoder response:', result);
+        if (result.status === 'Success' && result.data && result.data.length > 0) {
+          return result.data[0];
+        }
       }
     } catch (error) {
       console.error('Error getting location details:', error);
@@ -134,11 +141,11 @@ export default function BusinessLocationAnalyzer() {
     return null;
   };
 
-  // Search for nearby businesses using landmark search
+  // Search for nearby businesses using landmark API
   const searchNearbyBusinesses = async (lat, lon, businessType) => {
     try {
       const response = await fetch(
-        `https://apihub.latlong.ai/v1/landmark.json?lat=${lat}&lon=${lon}&query=${encodeURIComponent(businessType)}&radius=2000`,
+        `https://api.latlong.in/v2/landmark.json?lat=${lat}&lon=${lon}&query=${encodeURIComponent(businessType)}`,
         {
           headers: {
             'X-Authorization-Token': apiKey
@@ -147,8 +154,18 @@ export default function BusinessLocationAnalyzer() {
       );
       
       if (response.ok) {
-        const data = await response.json();
-        return data.features || [];
+        const result = await response.json();
+        console.log('Landmark response:', result);
+        if (result.status === 'Success' && result.data) {
+          // V2 landmark API returns {north: [], south: [], east: [], west: []}
+          const allBusinesses = [
+            ...(result.data.north || []),
+            ...(result.data.south || []),
+            ...(result.data.east || []),
+            ...(result.data.west || [])
+          ];
+          return allBusinesses;
+        }
       }
     } catch (error) {
       console.error('Error searching businesses:', error);
@@ -165,16 +182,23 @@ export default function BusinessLocationAnalyzer() {
     setAnalyzing(true);
     
     try {
-      const [lon, lat] = selectedLocation.geometry.coordinates;
       const geoid = selectedLocation.properties.geoid;
       
-      console.log('Analyzing location:', { lat, lon, geoid });
+      console.log('Analyzing location with geoid:', geoid);
       
-      // Get detailed location info
-      let locationDetails = null;
-      if (geoid) {
-        locationDetails = await getLocationDetailsFromGeoid(geoid);
+      // First get lat/lon from geoid using geocoder
+      const locationDetails = await getLocationDetailsFromGeoid(geoid);
+      
+      if (!locationDetails || !locationDetails.lat || !locationDetails.lon) {
+        alert('Could not get location coordinates. Please try another location.');
+        setAnalyzing(false);
+        return;
       }
+      
+      const lat = parseFloat(locationDetails.lat);
+      const lon = parseFloat(locationDetails.lon);
+      
+      console.log('Got coordinates:', { lat, lon });
       
       // Search for nearby competitors using landmark API
       const nearbyBusinesses = await searchNearbyBusinesses(lat, lon, businessType);
@@ -184,16 +208,15 @@ export default function BusinessLocationAnalyzer() {
       // Calculate statistics
       const competitors = nearbyBusinesses.length;
       const topCompetitors = nearbyBusinesses.slice(0, 5).map((business, idx) => {
-        const distance = business.properties?.distance 
-          ? (business.properties.distance / 1000).toFixed(2) 
-          : (Math.random() * 2).toFixed(2);
+        // V2 landmark API returns {name, address, distance}
+        const distance = business.distance || `${(Math.random() * 2).toFixed(2)} km`;
         
         return {
-          name: business.properties?.name || `${businessType} ${idx + 1}`,
-          distance: `${distance} km`,
-          rating: business.properties?.rating || (3.5 + Math.random() * 1.5).toFixed(1),
+          name: business.name || `${businessType} ${idx + 1}`,
+          distance: typeof distance === 'number' ? `${(distance/1000).toFixed(2)} km` : distance,
+          rating: (3.5 + Math.random() * 1.5).toFixed(1),
           customers: Math.floor(Math.random() * 500) + 200,
-          address: business.properties?.address || business.properties?.display_name || 'Address not available'
+          address: business.address || 'Address not available'
         };
       });
       
@@ -247,7 +270,7 @@ export default function BusinessLocationAnalyzer() {
         demographics: {
           area: locationParts[locationParts.length - 1] || 'Delhi',
           locality: locationParts[0] || selectedLocation.properties.name,
-          pincode: locationDetails?.pincode || 'N/A'
+          pincode: locationDetails.pincode || 'N/A'
         },
         recommendations,
         locationCoords: { lat, lon },
